@@ -63,11 +63,16 @@
     font-family:inherit;color:var(--ink);background:var(--stage);
     border:1.5px solid var(--panel-edge);border-radius:3px;padding:6px 8px;
     resize:vertical;min-height:56px;-webkit-user-select:text;user-select:text;}
+  .dom{display:none;align-items:center;gap:6px;margin:8px 2px 0;
+    font-size:11px;letter-spacing:.08em;font-variant:small-caps;color:var(--rule);}
+  .dom input{width:74px;font-size:12px;text-align:right;
+    font-family:"SF Mono",Menlo,Consolas,monospace;color:var(--ink);
+    background:var(--stage);border:1.5px solid var(--panel-edge);border-radius:3px;
+    padding:4px 6px;-webkit-user-select:text;user-select:text;}
   #expr{font-size:12px;margin:8px 2px 0;color:var(--blue);min-height:16px;
     font-family:"SF Mono",Menlo,Consolas,monospace;word-break:break-all;}
   #expr .who{color:var(--rule);font-family:inherit;font-variant:small-caps;
     letter-spacing:.08em;font-size:10.5px;}
-  /* add-node overlay */
   #menu{position:absolute;inset:0;background:rgba(0,0,0,.35);display:none;
     align-items:flex-start;justify-content:center;padding:16px;z-index:5;}
   #menu .card{background:var(--panel);border:2px solid var(--ink);border-radius:4px;
@@ -76,7 +81,6 @@
     font-variant:small-caps;font-weight:normal;border-bottom:1px solid var(--panel-edge);}
   #menu .grid{display:flex;flex-wrap:wrap;gap:5px;}
   #menu .grid button{padding:6px 9px;font-size:12px;background:var(--stage);}
-  /* right-click context menu */
   #ctx{position:absolute;display:none;z-index:6;background:var(--panel);
     border:2px solid var(--ink);border-radius:4px;min-width:132px;max-height:82%;
     overflow:auto;padding:4px;}
@@ -86,7 +90,6 @@
   #ctx button.cat{color:var(--red);}
   #ctx button.back{color:var(--rule);border-bottom:1px solid var(--panel-edge);
     border-radius:0;margin-bottom:2px;}
-  /* tab finder */
   #finder{position:absolute;display:none;z-index:6;left:50%;top:12px;
     transform:translateX(-50%);width:min(320px,88%);background:var(--panel);
     border:2px solid var(--ink);border-radius:4px;padding:8px;}
@@ -101,13 +104,11 @@
     padding:5px 8px;font-size:12px;}
   #finderList button:active,#finderList button.hot{background:var(--panel-edge);}
   #finderList .c{color:var(--rule);font-size:10px;letter-spacing:.08em;font-variant:small-caps;}
-  /* save overlay (press & hold) */
   #saveOv{position:fixed;inset:0;background:rgba(0,0,0,.9);display:none;
     flex-direction:column;align-items:center;justify-content:center;z-index:10;padding:18px;}
   #saveOv img{max-width:94%;max-height:76%;border:4px solid var(--ink);}
   #saveOv p{color:var(--ink);font-size:13px;letter-spacing:.06em;text-align:center;}
   #saveOv button{margin-top:6px;}
-  /* HSD two-pane on wide screens */
   @media (min-width:900px){
     .wrap{max-width:1240px;}
     .panes{grid-template-columns:1.05fr 1fr;align-items:start;}
@@ -127,13 +128,18 @@
           <button data-act="open">open graph…</button>
           <button data-act="save">save graph</button>
         </div></div>
+      <div class="menu"><button id="mMode">mode ▾</button>
+        <div class="drop" id="dMode">
+          <button data-mode="1d">1d explicit</button>
+          <button data-mode="par">parametric 2d</button>
+        </div></div>
       <div class="menu"><button id="mEx">examples ▾</button>
         <div class="drop" id="dEx"></div></div>
       <button id="themeBtn">◐ theme</button>
     </nav>
-    <div class="pl">v0.7</div>
+    <div class="pl">v0.8</div>
   </header>
-  <div class="sub">every wire carries y(x) · flow nodes re-parameterize · tap a node for its curve &amp; recipe</div>
+  <div class="sub" id="subLine">every wire carries y(x) · flow nodes re-parameterize · tap a node for its curve &amp; recipe</div>
 
   <div class="panes">
     <div>
@@ -151,13 +157,18 @@
         <button id="copyBtn">⎘ copy</button>
         <button id="pasteBtn">⎗ paste</button>
         <button id="delBtn">delete</button>
-        <button id="playBtn">▷ play t</button>
+        <button id="playBtn">▷ play τ</button>
         <button id="saveBtn">save png</button>
       </div>
       <div id="inspector"></div>
     </div>
     <div>
       <div class="stage" id="plotStage"><canvas id="pc"></canvas></div>
+      <div class="dom" id="domRow">t ∈ [
+        <input id="t0" inputmode="decimal" step="any" type="number">
+        ,
+        <input id="t1" inputmode="decimal" step="any" type="number">
+        ]</div>
       <div id="expr"></div>
     </div>
   </div>
@@ -206,6 +217,16 @@ function setTheme(name){
     document.documentElement.style.setProperty("--"+k, v);
   drawAll();
 }
+
+/* ---------------- modes ----------------
+   1d : plot node renders y = f(x)
+   par: plot xy node renders ( x(t), y(t) ), t in tDom      */
+let MODE = "1d";
+let tDom = {a:0, b:6.2832};
+function VN(){ return MODE==="par" ? "t" : "x"; }          // parameter name
+function CN(){ return MODE==="par" ? "τ" : "t"; }          // clock name
+function activePlotType(){ return MODE==="par" ? "PLOT2" : "PLOT"; }
+function modeOK(def){ return !def.modes || def.modes.includes(MODE); }
 
 /* ---------------- node definitions ---------------- */
 const PRE = "const {sin,cos,tan,exp,log,sqrt,floor,abs,sign,min,max,pow,atan}=Math;" +
@@ -269,13 +290,14 @@ const DEFS = {
   COMMENT:{cat:"ann", label:"comment", ins:[], noOut:true, isAnn:true},
   FRAME:  {cat:"ann", label:"frame",   ins:[], noOut:true, isAnn:true},
 
-  PLOT:   {cat:"out", label:"plot",  ins:["y"],  noOut:true, d:[0], ex:(y)=>y},
+  PLOT:   {cat:"out", label:"plot",    ins:["y"],      noOut:true, d:[0],   modes:["1d"],  ex:(y)=>y},
+  PLOT2:  {cat:"out", label:"plot xy", ins:["x","y"],  noOut:true, d:[0,0], modes:["par"]},
 };
 function fmtNum(v){ const s = Number(v.toPrecision(6)).toString(); return v<0?`(${s})`:s; }
 
 /* ---------------- graph model ---------------- */
-let nodes = [];           // {id,type,x,y,val, text?,w?,h?}
-let wires = [];           // {from, to, port}
+let nodes = [];
+let wires = [];
 let nextId = 1;
 let selId = -1;
 let selWire = null;
@@ -390,7 +412,7 @@ function duplicateSelected(){
   if (selId<0) return;
   const n = nodeById(selId); if(!n) return;
   copySelected();
-  pasteShift = 6;                       // lands at +24 total
+  pasteShift = 6;
   pasteClip({x:n.x, y:n.y});
 }
 function wireAt(p){
@@ -419,7 +441,7 @@ function placeNode(type, wx, wy){
 
 /* ---------------- save / load graph ---------------- */
 function serializeGraph(){
-  return JSON.stringify({app:"function-loom", v:7,
+  return JSON.stringify({app:"function-loom", v:8, mode:MODE, tDom:{...tDom},
     nodes:nodes.map(n=>{
       const o={id:n.id,type:n.type,x:Math.round(n.x),y:Math.round(n.y),val:n.val};
       if (n.text!==undefined) o.text=n.text;
@@ -449,6 +471,8 @@ function loadGraphObject(o){
   nextId = o.nextId || (Math.max(0,...nodes.map(n=>n.id))+1);
   selId=-1; selWire=null;
   endAction();
+  if (o.tDom && isFinite(o.tDom.a) && isFinite(o.tDom.b)) tDom={a:o.tDom.a,b:o.tDom.b};
+  setMode(o.mode==="par" ? "par" : "1d", true);
   gpan={x:0,y:0}; gscale=1;
   updateInspector(); drawAll();
   return true;
@@ -475,7 +499,7 @@ fileIn.addEventListener("change", ()=>{
   fileIn.value="";
 });
 
-/* ---------------- compile: each node becomes n{id}(x,t,i) ---------------- */
+/* ---------------- compile ---------------- */
 function isFnIn(def,i){ return (def.fin||[]).includes(i); }
 function callArg(nid, i){
   const def = DEFS[nodeById(nid).type];
@@ -508,6 +532,7 @@ function localExpr(nid){
     case "XOR":   return `((((${A[0]}) > 0.5) !== ((${A[1]}) > 0.5)) ? 1 : 0)`;
     case "IF":    return `((${A[0]}) > 0.5 ? (${A[1]}) : (${A[2]}))`;
     case "COMMENT": case "FRAME": return "0";
+    case "PLOT2": return A[0];
     default:      return def.ex(...A);
   }
 }
@@ -528,6 +553,12 @@ function compile(id){
   try { return new Function(PRE + code + `return n${id};`)(); }
   catch(e){ return ()=>NaN; }
 }
+function compileInput(nid, i){   // compile whatever feeds port i (or its default)
+  const w = wireInto(nid, i);
+  if (w) return compile(w.from);
+  const v = DEFS[nodeById(nid).type].d[i];
+  return ()=>v;
+}
 
 /* ---------------- pretty printer ---------------- */
 function pArg(nid, i, xn){
@@ -542,12 +573,12 @@ function pexpr(id, xn, depth){
   const wf = wireInto(id, 0);
   switch(n.type){
     case "X":     return xn;
-    case "TIME":  return "t";
+    case "TIME":  return CN();
     case "INDEX": return "i";
     case "CONST": return fmtNum(n.val);
     case "SAMPLE":return wf ? pexpr(wf.from, `(${pArg(id,1,xn)})`, depth) : "0";
     case "SHIFT": return wf ? pexpr(wf.from, `(${xn} - ${pArg(id,1,xn)})`, depth) : "0";
-    case "DIFF":  return `d/dx[ ${wf?pexpr(wf.from,xn,depth):"0"} ]`;
+    case "DIFF":  return `d/d${VN()}[ ${wf?pexpr(wf.from,xn,depth):"0"} ]`;
     case "BLUR":  return `blur⟨${pArg(id,1,xn)}⟩[ ${wf?pexpr(wf.from,xn,depth):"0"} ]`;
     case "SUM":   return `Σ_{i=0..${pArg(id,1,xn)}} ( ${wf?pexpr(wf.from,xn,depth):"0"} )`;
     case "PROD":  return `Π_{i=0..${pArg(id,1,xn)}} ( ${wf?pexpr(wf.from,xn,depth):"0"} )`;
@@ -562,11 +593,12 @@ function pexpr(id, xn, depth){
     case "XOR":   return `(${pArg(id,0,xn)} ⊕ ${pArg(id,1,xn)})`;
     case "IF":    return `(${pArg(id,0,xn)} ? ${pArg(id,1,xn)} : ${pArg(id,2,xn)})`;
     case "PLOT":  return pArg(id,0,xn);
+    case "PLOT2": return `( ${pArg(id,0,xn)} , ${pArg(id,1,xn)} )`;
     default:      return def.ex(...def.ins.map((_,i)=>pArg(id,i,xn)));
   }
 }
 function prettyOf(id){
-  let s = pexpr(id, "x");
+  let s = pexpr(id, VN());
   if (s.length>230) s = s.slice(0,110) + " … " + s.slice(-110);
   return s;
 }
@@ -584,15 +616,22 @@ let GW=0,GH=0,PW=0,PH=0;
 function resize(){
   ({w:GW,h:GH} = sizeCanvas(gc));
   ({w:PW,h:PH} = sizeCanvas(pc));
+  if (MODE==="par") lockAspect();
   drawAll();
 }
 window.addEventListener("resize", resize);
+function lockAspect(){       // 1 unit x = 1 unit y in pixels
+  if (!PW || !PH) return;
+  const cy = (view.y0+view.y1)/2;
+  const yr = (view.x1-view.x0)*PH/PW;
+  view.y0 = cy-yr/2; view.y1 = cy+yr/2;
+}
 
 /* ---------------- graph view / geometry ---------------- */
 let gpan = {x:0,y:0};
 let gscale = 1;
 const NW = 88;
-const CMW = 150;                       // comment width
+const CMW = 150;
 function commentLines(n){
   gctx.font = "11px Iowan Old Style, Palatino, Georgia, serif";
   const words = String(n.text||"").split(/\s+/);
@@ -617,6 +656,15 @@ function nodeH(n){
 }
 function inPortPos(n,i){ return {x:n.x, y:n.y+26+i*18+7}; }
 function outPortPos(n){ return {x:n.x+NW, y:n.y+nodeH(n)/2}; }
+function nodeTitle(n){
+  if (n.type==="X")    return MODE==="par" ? "param t" : "x";
+  if (n.type==="TIME") return MODE==="par" ? "time τ"  : "time";
+  const def = DEFS[n.type];
+  return def.hasVal ? fmtNum(n.val) : def.label;
+}
+function inactivePlot(n){
+  return (n.type==="PLOT" && MODE!=="1d") || (n.type==="PLOT2" && MODE!=="par");
+}
 
 function drawGraph(){
   const c = gctx;
@@ -630,7 +678,6 @@ function drawGraph(){
   c.translate(gpan.x, gpan.y);
   c.scale(gscale, gscale);
 
-  // frames first (behind everything)
   for(const n of nodes) if (n.type==="FRAME"){
     const sel = n.id===selId;
     c.fillStyle = TH.frameFill;
@@ -643,7 +690,7 @@ function drawGraph(){
     c.font = "12px Iowan Old Style, Palatino, Georgia, serif";
     c.textAlign="left"; c.textBaseline="middle";
     c.fillText(n.text||"frame", n.x+9, n.y+12);
-    c.beginPath();                     // resize notch
+    c.beginPath();
     c.moveTo(n.x+n.w-11, n.y+n.h-3); c.lineTo(n.x+n.w-3, n.y+n.h-11);
     c.moveTo(n.x+n.w-7,  n.y+n.h-3); c.lineTo(n.x+n.w-3, n.y+n.h-7);
     c.strokeStyle = TH.frameEdge; c.lineWidth=1.4; c.stroke();
@@ -686,14 +733,16 @@ function drawGraph(){
       continue;
     }
     const def = DEFS[n.type], h = nodeH(n);
+    if (inactivePlot(n)) c.globalAlpha = 0.45;
     c.fillStyle = TH.nodeFill;
     c.strokeStyle = sel ? TH.nodeSel : TH.nodeStroke;
     c.lineWidth = sel ? 2.4 : 1.6;
     rr(c, n.x, n.y, NW, h, 4); c.fill(); c.stroke();
-    c.fillStyle = n.type==="PLOT" ? plotColor(n.id) : (def.cat==="flw" ? TH.flowTitle : TH.title);
+    c.fillStyle = (n.type==="PLOT"||n.type==="PLOT2") ? plotColor(n.id)
+                : (def.cat==="flw" ? TH.flowTitle : TH.title);
     c.font = "12px Iowan Old Style, Palatino, Georgia, serif";
     c.textAlign="center"; c.textBaseline="middle";
-    c.fillText(def.hasVal ? fmtNum(n.val) : def.label, n.x+NW/2, n.y+13);
+    c.fillText(nodeTitle(n), n.x+NW/2, n.y+13);
     c.strokeStyle=TH.divider; c.lineWidth=1;
     c.beginPath(); c.moveTo(n.x+5,n.y+22); c.lineTo(n.x+NW-5,n.y+22); c.stroke();
     c.font = "9px Iowan Old Style, Palatino, Georgia, serif";
@@ -705,11 +754,13 @@ function drawGraph(){
       c.fillText(name, p.x+8, p.y);
     });
     if (!def.noOut){ const p = outPortPos(n); dot(c, p.x, p.y, TH.portOut); }
+    c.globalAlpha = 1;
   }
 }
 function plotColor(id){
-  const plots = nodes.filter(n=>n.type==="PLOT").map(n=>n.id).sort((a,b)=>a-b);
-  return TH.plotCols[plots.indexOf(id) % TH.plotCols.length];
+  const n = nodeById(id); if(!n) return TH.plotCols[0];
+  const cohort = nodes.filter(m=>m.type===n.type).map(m=>m.id).sort((a,b)=>a-b);
+  return TH.plotCols[cohort.indexOf(id) % TH.plotCols.length];
 }
 function rr(c,x,y,w,h,r){ c.beginPath(); c.roundRect(x,y,w,h,r); }
 function dot(c,x,y,col,square){
@@ -758,15 +809,23 @@ function drawPlot(){
   c.beginPath(); c.moveTo(xToPx(0),0); c.lineTo(xToPx(0),PH); c.stroke();
 
   const sel = nodeById(selId);
-  if (sel && sel.type!=="PLOT" && !DEFS[sel.type].isAnn){
-    trace(c, compile(selId), TH.ghost, 1.4, [5,4]);
+  if (sel && sel.type!=="PLOT" && sel.type!=="PLOT2" && !DEFS[sel.type].isAnn){
+    const fn = compile(selId);
+    if (MODE==="par") traceDom(c, fn, TH.ghost, 1.4, [5,4]);
+    else trace(c, fn, TH.ghost, 1.4, [5,4]);
   }
-  for(const p of nodes.filter(n=>n.type==="PLOT")){
-    trace(c, compile(p.id), plotColor(p.id), 2.2);
+  if (MODE==="par"){
+    for(const p of nodes.filter(n=>n.type==="PLOT2")){
+      trace2(c, compileInput(p.id,0), compileInput(p.id,1), plotColor(p.id), 2.2);
+    }
+  } else {
+    for(const p of nodes.filter(n=>n.type==="PLOT")){
+      trace(c, compile(p.id), plotColor(p.id), 2.2);
+    }
   }
 }
 function trim(v){ const s = v.toPrecision(3); return parseFloat(s).toString(); }
-function trace(c, fn, col, w, dash){
+function trace(c, fn, col, w, dash){          // y = f(x) over visible x
   c.strokeStyle=col; c.lineWidth=w; if(dash) c.setLineDash(dash);
   const N = 420, yr = view.y1-view.y0;
   c.beginPath(); let pen=false, py=0;
@@ -781,16 +840,54 @@ function trace(c, fn, col, w, dash){
   }
   c.stroke(); c.setLineDash([]);
 }
+function traceDom(c, fn, col, w, dash){       // y = f(u) over u in tDom (ghost in par mode)
+  c.strokeStyle=col; c.lineWidth=w; if(dash) c.setLineDash(dash);
+  const N = 420, yr = view.y1-view.y0;
+  c.beginPath(); let pen=false, py=0;
+  for(let i=0;i<=N;i++){
+    const u = tDom.a + (tDom.b-tDom.a)*i/N;
+    let y; try{ y = fn(u,t,0); }catch(e){ y = NaN; }
+    if (!isFinite(y) || Math.abs(y-py)>yr*6 && pen){ pen=false; py=isFinite(y)?y:0;
+      if(isFinite(y)){ c.moveTo(xToPx(u), yToPx(y)); pen=true; } continue; }
+    const px=xToPx(u), pyy=yToPx(y);
+    if(!pen){ c.moveTo(px,pyy); pen=true; } else c.lineTo(px,pyy);
+    py=y;
+  }
+  c.stroke(); c.setLineDash([]);
+}
+function trace2(c, fx, fy, col, w){           // ( x(u), y(u) ) over u in tDom
+  c.strokeStyle=col; c.lineWidth=w;
+  const N = 800;
+  const xr = view.x1-view.x0, yr = view.y1-view.y0;
+  c.beginPath(); let pen=false, pX=0, pY=0;
+  for(let i=0;i<=N;i++){
+    const u = tDom.a + (tDom.b-tDom.a)*i/N;
+    let X, Y;
+    try{ X = fx(u,t,0); Y = fy(u,t,0); }catch(e){ X = NaN; Y = NaN; }
+    const bad = !isFinite(X) || !isFinite(Y);
+    const jump = pen && (Math.abs(X-pX)>xr*0.5 || Math.abs(Y-pY)>yr*0.5);
+    if (bad || jump){ pen=false;
+      if(!bad){ c.moveTo(xToPx(X), yToPx(Y)); pen=true; pX=X; pY=Y; }
+      continue; }
+    const px=xToPx(X), py=yToPx(Y);
+    if(!pen){ c.moveTo(px,py); pen=true; } else c.lineTo(px,py);
+    pX=X; pY=Y;
+  }
+  c.stroke();
+}
 
 /* ---------------- expression readout ---------------- */
 const exprEl = document.getElementById("expr");
 function updateExpr(){
   const sel = nodeById(selId);
   const useSel = sel && !DEFS[sel.type].isAnn;
-  let id = useSel ? selId : (nodes.find(n=>n.type==="PLOT")||{}).id;
+  let id = useSel ? selId
+    : (nodes.find(n=>n.type===activePlotType())||{}).id;
   if (id===undefined){ exprEl.innerHTML=""; return; }
+  const nd = nodeById(id);
   const who = useSel ? (DEFS[sel.type].label + " node") : "plot 1";
-  exprEl.innerHTML = `<span class="who">${who} · y = </span>${prettyOf(id)}`;
+  const lhs = (nd.type==="PLOT2") ? "(x, y) = " : "y = ";
+  exprEl.innerHTML = `<span class="who">${who} · ${lhs}</span>${prettyOf(id)}`;
 }
 
 /* ---------------- inspector ---------------- */
@@ -862,13 +959,13 @@ function hitPort(p, want){
   }
   return best;
 }
-function hitNode(p){          // regular nodes + comments (not frames)
+function hitNode(p){
   for(let i=nodes.length-1;i>=0;i--){ const n=nodes[i];
     if (n.type==="FRAME") continue;
     if (p.x>=n.x && p.x<=n.x+nodeW(n) && p.y>=n.y && p.y<=n.y+nodeH(n)) return n; }
   return null;
 }
-function hitFrame(p){         // frame title bar or resize handle
+function hitFrame(p){
   for(let i=nodes.length-1;i>=0;i--){ const n=nodes[i];
     if (n.type!=="FRAME") continue;
     const hR = 14/gscale;
@@ -888,8 +985,6 @@ gc.addEventListener("pointerdown", e=>{
   glast = p;
   const port = hitPort(p);
   const n = hitNode(p);
-  // wire only if: pressing near a pin from OUTSIDE any node body,
-  // or very close to a pin (and not in the title strip) when inside one
   let useWire = false;
   if (port){
     if (!n) useWire = true;
@@ -1071,9 +1166,11 @@ document.getElementById("addBtn").addEventListener("click", ()=>{
   closeDrops();
   menuCard.innerHTML = "";
   for(const cat of Object.keys(CAT)){
+    const defs = Object.entries(DEFS).filter(([_,d])=>d.cat===cat && modeOK(d));
+    if (!defs.length) continue;
     const h=document.createElement("h3"); h.textContent=CAT[cat]; menuCard.appendChild(h);
     const g=document.createElement("div"); g.className="grid";
-    for(const [type,def] of Object.entries(DEFS)) if(def.cat===cat){
+    for(const [type,def] of defs){
       const b=document.createElement("button"); b.textContent=def.label;
       b.addEventListener("click", ()=>{
         placeNode(type, (GW/2-gpan.x)/gscale+(Math.random()*40-20),
@@ -1100,13 +1197,15 @@ function ctxBtn(txt, cls, fn){
 }
 function renderCtxCats(){
   ctxEl.innerHTML="";
-  for(const cat of Object.keys(CAT))
+  for(const cat of Object.keys(CAT)){
+    if (!Object.values(DEFS).some(d=>d.cat===cat && modeOK(d))) continue;
     ctxEl.appendChild(ctxBtn(CAT[cat]+" ›", "cat", ()=>renderCtxNodes(cat)));
+  }
 }
 function renderCtxNodes(cat){
   ctxEl.innerHTML="";
   ctxEl.appendChild(ctxBtn("‹ "+CAT[cat], "back", renderCtxCats));
-  for(const [type,def] of Object.entries(DEFS)) if(def.cat===cat)
+  for(const [type,def] of Object.entries(DEFS)) if(def.cat===cat && modeOK(def))
     ctxEl.appendChild(ctxBtn(def.label, "", ()=>{
       placeNode(type, ctxWorld.x, ctxWorld.y); closeCtx();
     }));
@@ -1128,8 +1227,6 @@ gc.addEventListener("contextmenu", e=>{
 const finder = document.getElementById("finder");
 const finderIn = document.getElementById("finderIn");
 const finderList = document.getElementById("finderList");
-const ALL_NODES = Object.entries(DEFS).map(([type,def])=>
-  ({type, label:def.label, cat:CAT[def.cat]}));
 let finderHits = [];
 function closeFinder(){ finder.style.display="none"; finderIn.blur(); }
 function openFinder(){
@@ -1144,7 +1241,10 @@ function finderPlaceWorld(){
 }
 function renderFinder(q){
   q=q.trim().toLowerCase();
-  finderHits = ALL_NODES.filter(n=>
+  const all = Object.entries(DEFS)
+    .filter(([_,d])=>modeOK(d))
+    .map(([type,def])=>({type, label:def.label, cat:CAT[def.cat]}));
+  finderHits = all.filter(n=>
     !q || n.label.toLowerCase().includes(q) ||
     n.type.toLowerCase().includes(q) || n.cat.toLowerCase().includes(q));
   finderList.innerHTML="";
@@ -1169,12 +1269,15 @@ finderIn.addEventListener("keydown", e=>{
 
 /* ---------------- top menubar ---------------- */
 const dFile = document.getElementById("dFile");
+const dMode = document.getElementById("dMode");
 const dEx   = document.getElementById("dEx");
-function closeDrops(){ dFile.style.display="none"; dEx.style.display="none"; }
+function closeDrops(){ dFile.style.display="none"; dMode.style.display="none"; dEx.style.display="none"; }
 function toggleDrop(d){ const open = d.style.display==="block";
   closeDrops(); d.style.display = open ? "none" : "block"; }
 document.getElementById("mFile").addEventListener("click", e=>{
   e.stopPropagation(); toggleDrop(dFile); });
+document.getElementById("mMode").addEventListener("click", e=>{
+  e.stopPropagation(); toggleDrop(dMode); });
 document.getElementById("mEx").addEventListener("click", e=>{
   e.stopPropagation(); toggleDrop(dEx); });
 document.addEventListener("pointerdown", e=>{
@@ -1191,11 +1294,44 @@ dFile.addEventListener("click", e=>{
   else if (act==="open"){ fileIn.click(); }
   else if (act==="save"){ saveGraphFile(); }
 });
+dMode.addEventListener("click", e=>{
+  const m = e.target.dataset && e.target.dataset.mode;
+  if (!m) return;
+  closeDrops();
+  setMode(m);
+});
 let themeName = "ink";
 document.getElementById("themeBtn").addEventListener("click", ()=>{
   themeName = themeName==="ink" ? "plate" : "ink";
   setTheme(themeName);
 });
+
+/* ---------------- mode switching ---------------- */
+const domRow = document.getElementById("domRow");
+const t0In = document.getElementById("t0"), t1In = document.getElementById("t1");
+const subLine = document.getElementById("subLine");
+function setMode(m, quiet){
+  MODE = (m==="par") ? "par" : "1d";
+  for(const b of dMode.querySelectorAll("button"))
+    b.textContent = (b.dataset.mode==="1d" ? "1d explicit" : "parametric 2d")
+                  + (b.dataset.mode===MODE ? "  ✓" : "");
+  domRow.style.display = MODE==="par" ? "flex" : "none";
+  t0In.value = tDom.a; t1In.value = tDom.b;
+  subLine.textContent = MODE==="par"
+    ? "every wire carries a function of t · plot xy draws ( x(t), y(t) ) · tap a node to see it vs t"
+    : "every wire carries y(x) · flow nodes re-parameterize · tap a node for its curve & recipe";
+  if (MODE==="par") lockAspect();
+  rebuildExamples();
+  if (!quiet) drawAll();
+}
+function domChanged(){
+  const a=parseFloat(t0In.value), b=parseFloat(t1In.value);
+  if (isFinite(a)) tDom.a=a;
+  if (isFinite(b)) tDom.b=b;
+  drawPlot(); updateExpr();
+}
+t0In.addEventListener("input", domChanged);
+t1In.addEventListener("input", domChanged);
 
 /* ---------------- keyboard ---------------- */
 window.addEventListener("keydown", e=>{
@@ -1225,7 +1361,7 @@ document.getElementById("pasteBtn").addEventListener("click", ()=>pasteClip());
 const playBtn = document.getElementById("playBtn");
 playBtn.addEventListener("click", ()=>{
   playing=!playing; playBtn.classList.toggle("on", playing);
-  playBtn.textContent = playing ? "◼ pause t" : "▷ play t";
+  playBtn.textContent = playing ? "◼ pause τ" : "▷ play τ";
   if (playing) requestAnimationFrame(tick);
 });
 function tick(){
@@ -1245,18 +1381,25 @@ document.getElementById("saveBtn").addEventListener("click", ()=>{
 });
 document.getElementById("saveClose").addEventListener("click", ()=>saveOv.style.display="none");
 
-/* ---------------- example curriculum ---------------- */
-function loadPreset(build){
+/* ---------------- example curricula (per mode) ---------------- */
+function loadPreset(p){
+  const build = p.build || p;
   if (nodes.length) beginAction();
   nodes=[]; wires=[]; nextId=1; selId=-1; selWire=null; t=0;
+  if (p.mode==="par"){ tDom = p.dom ? {a:p.dom[0], b:p.dom[1]} : {a:0, b:6.2832}; }
   build();
   if (undoStack.length) endAction();
+  setMode(p.mode || "1d", true);
   gpan={x:0,y:0}; gscale=1;
+  if (p.view){ view = {...p.view}; if (MODE==="par") lockAspect(); }
+  else if (MODE==="par"){ view={x0:-2.4,x1:2.4,y0:-2,y1:2}; lockAspect(); }
+  else view = {x0:-3.4, x1:3.4, y0:-2.2, y1:2.2};
   updateInspector(); drawAll();
 }
 function note(x,y,text){ const c=addNode("COMMENT",x,y); c.text=text; return c; }
 
-const CURRICULUM = [
+const CURRICULA = {
+"1d": [
 ["i · lines & constants", {
   "line a·x + b": ()=>{
     note(300,20,"y = a·x + b — tap a const, scrub its slider. a is slope, b is height.");
@@ -1277,8 +1420,8 @@ const CURRICULUM = [
     connect(x.id,m.id,0); connect(k.id,m.id,1); connect(m.id,s.id,0);
     connect(s.id,m2.id,0); connect(a.id,m2.id,1); connect(m2.id,p.id,0);
   },
-  "travel (t)": ()=>{
-    note(16,16,"sin(k·x − t): press ▷ play t. Subtracting time slides the wave right.");
+  "travel (τ)": ()=>{
+    note(16,16,"sin(k·x − τ): press ▷ play τ. Subtracting the clock slides the wave right.");
     const x=addNode("X",16,84), tm=addNode("TIME",16,154);
     const k=addNode("CONST",16,222,3), m=addNode("MUL",126,102);
     const sb=addNode("SUB",236,118), s=addNode("SIN",344,118);
@@ -1437,23 +1580,115 @@ const CURRICULUM = [
     connect(dn.id,p2.id,0);
   },
 }],
-];
-const PRESETS = {};
-const dExRef = document.getElementById("dEx");
-for(const [section, plates] of CURRICULUM){
-  const h=document.createElement("div"); h.className="h"; h.textContent=section;
-  dExRef.appendChild(h);
-  for(const [name, build] of Object.entries(plates)){
-    PRESETS[name]=build;
-    const b=document.createElement("button"); b.textContent=name;
-    b.addEventListener("click", ()=>{ closeDrops(); loadPreset(build); });
-    dExRef.appendChild(b);
+],
+"par": [
+["i · closed curves", {
+  "circle": ()=>{
+    note(16,16,"( cos t , sin t ) for t ∈ [0, 2π] — the unit circle. One parameter, two coordinates.");
+    const u=addNode("X",16,96), c=addNode("COS",140,70), s=addNode("SIN",140,150);
+    const p=addNode("PLOT2",264,102);
+    connect(u.id,c.id,0); connect(u.id,s.id,0);
+    connect(c.id,p.id,0); connect(s.id,p.id,1);
+  },
+  "ellipse": ()=>{
+    note(16,10,"Scale each coordinate separately: ( a·cos t , b·sin t ). Scrub a and b.");
+    const u=addNode("X",16,90), c=addNode("COS",126,66), s=addNode("SIN",126,150);
+    const a=addNode("CONST",126,230,1.6), b=addNode("CONST",236,230,0.8);
+    const mx=addNode("MUL",236,80), my=addNode("MUL",346,150);
+    const p=addNode("PLOT2",456,108);
+    connect(u.id,c.id,0); connect(u.id,s.id,0);
+    connect(c.id,mx.id,0); connect(a.id,mx.id,1);
+    connect(s.id,my.id,0); connect(b.id,my.id,1);
+    connect(mx.id,p.id,0); connect(my.id,p.id,1);
+  },
+  "rose (r = cos 3t)": ()=>{
+    note(16,6,"Polar in disguise: r(t)·(cos t, sin t) with r = cos(3t). Odd k → k petals; try 4.");
+    const u=addNode("X",16,90);
+    const k=addNode("CONST",16,166,3), mk=addNode("MUL",120,108);
+    const r=addNode("COS",224,108);
+    const c=addNode("COS",120,214), s=addNode("SIN",120,290);
+    const mx=addNode("MUL",330,150), my=addNode("MUL",330,250);
+    const p=addNode("PLOT2",446,192);
+    connect(u.id,mk.id,0); connect(k.id,mk.id,1); connect(mk.id,r.id,0);
+    connect(u.id,c.id,0); connect(u.id,s.id,0);
+    connect(r.id,mx.id,0); connect(c.id,mx.id,1);
+    connect(r.id,my.id,0); connect(s.id,my.id,1);
+    connect(mx.id,p.id,0); connect(my.id,p.id,1);
+  },
+}],
+["ii · lissajous", {
+  "lissajous 3:2": ()=>{
+    note(16,10,"( sin 3t , sin 2t ) — two independent oscillations, one drawing hand. Try 5 and 4.");
+    const u=addNode("X",16,96);
+    const k1=addNode("CONST",16,172,3), m1=addNode("MUL",126,84), s1=addNode("SIN",236,84);
+    const k2=addNode("CONST",126,246,2), m2=addNode("MUL",236,182), s2=addNode("SIN",346,182);
+    const p=addNode("PLOT2",456,126);
+    connect(u.id,m1.id,0); connect(k1.id,m1.id,1); connect(m1.id,s1.id,0);
+    connect(u.id,m2.id,0); connect(k2.id,m2.id,1); connect(m2.id,s2.id,0);
+    connect(s1.id,p.id,0); connect(s2.id,p.id,1);
+  },
+}],
+["iii · spirals", {
+  "archimedean spiral": Object.assign(()=>{
+    note(16,6,"r grows with t: ( k·t·cos t , k·t·sin t ). The domain runs to 8π — edit t₁ below the plot.");
+    const u=addNode("X",16,96);
+    const k=addNode("CONST",16,172,0.08), r=addNode("MUL",126,110);
+    const c=addNode("COS",126,214), s=addNode("SIN",126,290);
+    const mx=addNode("MUL",246,150), my=addNode("MUL",246,250);
+    const p=addNode("PLOT2",366,192);
+    connect(k.id,r.id,0); connect(u.id,r.id,1);
+    connect(u.id,c.id,0); connect(u.id,s.id,0);
+    connect(r.id,mx.id,0); connect(c.id,mx.id,1);
+    connect(r.id,my.id,0); connect(s.id,my.id,1);
+    connect(mx.id,p.id,0); connect(my.id,p.id,1);
+  }, {dom:[0, 25.1327]}),
+}],
+["iv · epicycles", {
+  "gear flower": ()=>{
+    note(10,-4,"Circles on circles: ( cos t + a·cos kt , sin t + a·sin kt ). One Fourier term beyond the circle.");
+    const u=addNode("X",10,96);
+    const c1=addNode("COS",120,64), s1=addNode("SIN",120,144);
+    const k=addNode("CONST",10,180,5), mk=addNode("MUL",120,226);
+    const c2=addNode("COS",230,206), s2=addNode("SIN",230,286);
+    const a=addNode("CONST",230,366,0.4);
+    const mxa=addNode("MUL",340,226), mya=addNode("MUL",340,306);
+    const ax=addNode("ADD",450,140), ay=addNode("ADD",450,240);
+    const p=addNode("PLOT2",560,182);
+    connect(u.id,c1.id,0); connect(u.id,s1.id,0);
+    connect(u.id,mk.id,0); connect(k.id,mk.id,1);
+    connect(mk.id,c2.id,0); connect(mk.id,s2.id,0);
+    connect(c2.id,mxa.id,0); connect(a.id,mxa.id,1);
+    connect(s2.id,mya.id,0); connect(a.id,mya.id,1);
+    connect(c1.id,ax.id,0); connect(mxa.id,ax.id,1);
+    connect(s1.id,ay.id,0); connect(mya.id,ay.id,1);
+    connect(ax.id,p.id,0); connect(ay.id,p.id,1);
+  },
+}],
+],
+};
+function rebuildExamples(){
+  dEx.innerHTML="";
+  for(const [section, plates] of CURRICULA[MODE]){
+    const h=document.createElement("div"); h.className="h"; h.textContent=section;
+    dEx.appendChild(h);
+    for(const [name, entry] of Object.entries(plates)){
+      const b=document.createElement("button"); b.textContent=name;
+      const p = {build:entry, dom:entry.dom, mode:MODE};
+      b.addEventListener("click", ()=>{ closeDrops(); loadPreset(p); });
+      dEx.appendChild(b);
+    }
   }
 }
+const PRESETS = {};   // flat index for tests / boot
+for(const mode of Object.keys(CURRICULA))
+  for(const [_,plates] of CURRICULA[mode])
+    for(const [name,entry] of Object.entries(plates))
+      PRESETS[name] = {build:entry, dom:entry.dom, mode};
 
 /* ---------------- boot ---------------- */
 function drawAll(){ drawGraph(); drawPlot(); updateExpr(); }
 setTheme("ink");
+setMode("1d", true);
 loadPreset(PRESETS["wave"]);
 resize();
 </script>
