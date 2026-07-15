@@ -132,12 +132,13 @@
         <div class="drop" id="dMode">
           <button data-mode="1d">1d explicit</button>
           <button data-mode="par">parametric 2d</button>
+          <button data-mode="la">linear algebra 2d</button>
         </div></div>
       <div class="menu"><button id="mEx">examples ▾</button>
         <div class="drop" id="dEx"></div></div>
       <button id="themeBtn">◐ theme</button>
     </nav>
-    <div class="pl">v0.8</div>
+    <div class="pl">v0.9</div>
   </header>
   <div class="sub" id="subLine">every wire carries y(x) · flow nodes re-parameterize · tap a node for its curve &amp; recipe</div>
 
@@ -189,6 +190,7 @@ const THEMES = {
     title:"#ddd3c2", flowTitle:"#92a8e0", divider:"#454c59",
     portEmpty:"#6b7383", portVal:"#ddd3c2", portFn:"#7f97d2", portOut:"#d0603e",
     wireVal:"#c8bfae", wireFn:"#7f97d2", wireDrag:"#d0603e",
+    vec:"#7bbfa0", mat:"#b48ed8",
     plotBg:"#23272e", gridLine:"rgba(160,150,130,.20)", axis:"#c8bfae",
     tick:"#8d94a3", ghost:"#ddd3c2", label:"#8d94a3",
     frameEdge:"#566079", frameFill:"rgba(127,151,210,.07)", frameTitle:"#9fb0d8",
@@ -203,6 +205,7 @@ const THEMES = {
     title:"#22303f", flowTitle:"#23396b", divider:"#cdb78a",
     portEmpty:"#b9a47a", portVal:"#22303f", portFn:"#23396b", portOut:"#aa3a2c",
     wireVal:"#22303f", wireFn:"#23396b", wireDrag:"#aa3a2c",
+    vec:"#3f6d4e", mat:"#5c3d78",
     plotBg:"#f3e9d2", gridLine:"rgba(185,164,122,.55)", axis:"#22303f",
     tick:"#6b5d40", ghost:"#22303f", label:"#6b5d40",
     frameEdge:"#b9a47a", frameFill:"rgba(35,57,107,.05)", frameTitle:"#23396b",
@@ -220,13 +223,14 @@ function setTheme(name){
 
 /* ---------------- modes ----------------
    1d : plot node renders y = f(x)
-   par: plot xy node renders ( x(t), y(t) ), t in tDom      */
+   par: plot xy renders ( x(t), y(t) ), t in tDom
+   la : typed wires (scalar/vec/mat); draw vec & draw mat render the plane */
 let MODE = "1d";
 let tDom = {a:0, b:6.2832};
-function VN(){ return MODE==="par" ? "t" : "x"; }          // parameter name
-function CN(){ return MODE==="par" ? "τ" : "t"; }          // clock name
-function activePlotType(){ return MODE==="par" ? "PLOT2" : "PLOT"; }
+function VN(){ return MODE==="1d" ? "x" : "t"; }
+function CN(){ return MODE==="1d" ? "t" : "τ"; }
 function modeOK(def){ return !def.modes || def.modes.includes(MODE); }
+const PLOT_OF_MODE = {PLOT:"1d", PLOT2:"par", DRAWV:"la", DRAWM:"la"};
 
 /* ---------------- node definitions ---------------- */
 const PRE = "const {sin,cos,tan,exp,log,sqrt,floor,abs,sign,min,max,pow,atan}=Math;" +
@@ -235,16 +239,35 @@ const PRE = "const {sin,cos,tan,exp,log,sqrt,floor,abs,sign,min,max,pow,atan}=Ma
   "const mod=(a,b)=>((a%b)+b)%b;" +
   "const clamp=(a,lo,hi)=>Math.min(Math.max(a,lo),hi);" +
   "const mix=(a,b,k)=>a+(b-a)*k;" +
-  "const smoothstep=(e0,e1,a)=>{const k=Math.min(Math.max((a-e0)/(e1-e0),0),1);return k*k*(3-2*k);};";
+  "const smoothstep=(e0,e1,a)=>{const k=Math.min(Math.max((a-e0)/(e1-e0),0),1);return k*k*(3-2*k);};" +
+  "const v2=(x,y)=>[x,y];" +
+  "const vadd=(a,b)=>[a[0]+b[0],a[1]+b[1]];" +
+  "const vsub=(a,b)=>[a[0]-b[0],a[1]-b[1]];" +
+  "const vscale=(s,a)=>[s*a[0],s*a[1]];" +
+  "const dot2=(a,b)=>a[0]*b[0]+a[1]*b[1];" +
+  "const len2=a=>Math.hypot(a[0],a[1]);" +
+  "const norm2=a=>{const l=Math.hypot(a[0],a[1]);return l>1e-12?[a[0]/l,a[1]/l]:[0,0];};" +
+  "const proj2=(a,b)=>{const d=dot2(b,b);return d>1e-12?vscale(dot2(a,b)/d,b):[0,0];};" +
+  "const perp2=a=>[-a[1],a[0]];" +
+  "const rot2=th=>[Math.cos(th),-Math.sin(th),Math.sin(th),Math.cos(th)];" +
+  "const scl2=(sx,sy)=>[sx,0,0,sy];" +
+  "const shr2=(kx,ky)=>[1,kx,ky,1];" +
+  "const mv=(m,v)=>[m[0]*v[0]+m[1]*v[1], m[2]*v[0]+m[3]*v[1]];" +
+  "const mm=(A,B)=>[A[0]*B[0]+A[1]*B[2], A[0]*B[1]+A[1]*B[3], A[2]*B[0]+A[3]*B[2], A[2]*B[1]+A[3]*B[3]];" +
+  "const det2=m=>m[0]*m[3]-m[1]*m[2];" +
+  "const inv2=m=>{const d=det2(m);if(Math.abs(d)<1e-12)return[NaN,NaN,NaN,NaN];return[m[3]/d,-m[1]/d,-m[2]/d,m[0]/d];};" +
+  "const mmix=(A,B,k)=>[A[0]+(B[0]-A[0])*k,A[1]+(B[1]-A[1])*k,A[2]+(B[2]-A[2])*k,A[3]+(B[3]-A[3])*k];";
 
 const CAT = { src:"◈ source", ari:"＋ arithmetic", wav:"∿ wave",
-              shp:"⌗ shape", flw:"⟳ flow", log:"≷ logic",
+              shp:"⌗ shape", vec:"⇀ vector", mat:"▦ matrix",
+              flw:"⟳ flow", log:"≷ logic",
               ann:"✎ annotate", out:"▤ output" };
+const M12 = ["1d","par"];   // classic scalar-signal modes
 
 const DEFS = {
-  X:      {cat:"src", label:"x",       ins:[]},
+  X:      {cat:"src", label:"x",       ins:[], modes:M12},
   TIME:   {cat:"src", label:"time",    ins:[]},
-  INDEX:  {cat:"src", label:"index i", ins:[]},
+  INDEX:  {cat:"src", label:"index i", ins:[], modes:M12},
   CONST:  {cat:"src", label:"const",   ins:[], hasVal:true},
   ADD:    {cat:"ari", label:"add",   ins:["a","b"], d:[0,0], ex:(a,b)=>`(${a} + ${b})`},
   SUB:    {cat:"ari", label:"sub",   ins:["a","b"], d:[0,0], ex:(a,b)=>`(${a} - ${b})`},
@@ -253,47 +276,75 @@ const DEFS = {
   NEG:    {cat:"ari", label:"neg",   ins:["a"],     d:[0],   ex:(a)=>`(-${a})`},
   SIN:    {cat:"wav", label:"sin",   ins:["a"],     d:[0],   ex:(a)=>`sin(${a})`},
   COS:    {cat:"wav", label:"cos",   ins:["a"],     d:[0],   ex:(a)=>`cos(${a})`},
-  TAN:    {cat:"wav", label:"tan",   ins:["a"],     d:[0],   ex:(a)=>`tan(${a})`},
-  EXP:    {cat:"wav", label:"exp",   ins:["a"],     d:[0],   ex:(a)=>`exp(${a})`},
-  LOG:    {cat:"wav", label:"log",   ins:["a"],     d:[1],   ex:(a)=>`log(${a})`},
+  TAN:    {cat:"wav", label:"tan",   ins:["a"],     d:[0],   modes:M12, ex:(a)=>`tan(${a})`},
+  EXP:    {cat:"wav", label:"exp",   ins:["a"],     d:[0],   modes:M12, ex:(a)=>`exp(${a})`},
+  LOG:    {cat:"wav", label:"log",   ins:["a"],     d:[1],   modes:M12, ex:(a)=>`log(${a})`},
   SQRT:   {cat:"wav", label:"sqrt",  ins:["a"],     d:[0],   ex:(a)=>`sqrt(${a})`},
   POW:    {cat:"wav", label:"pow",   ins:["a","b"], d:[0,2], ex:(a,b)=>`pow(${a}, ${b})`},
   ABS:    {cat:"shp", label:"abs",   ins:["a"],     d:[0],   ex:(a)=>`abs(${a})`},
-  SIGN:   {cat:"shp", label:"sign",  ins:["a"],     d:[0],   ex:(a)=>`sign(${a})`},
-  FLOOR:  {cat:"shp", label:"floor", ins:["a"],     d:[0],   ex:(a)=>`floor(${a})`},
-  FRAC:   {cat:"shp", label:"frac",  ins:["a"],     d:[0],   ex:(a)=>`frac(${a})`},
-  MOD:    {cat:"shp", label:"mod",   ins:["a","b"], d:[0,2], ex:(a,b)=>`mod(${a}, ${b})`},
+  SIGN:   {cat:"shp", label:"sign",  ins:["a"],     d:[0],   modes:M12, ex:(a)=>`sign(${a})`},
+  FLOOR:  {cat:"shp", label:"floor", ins:["a"],     d:[0],   modes:M12, ex:(a)=>`floor(${a})`},
+  FRAC:   {cat:"shp", label:"frac",  ins:["a"],     d:[0],   modes:M12, ex:(a)=>`frac(${a})`},
+  MOD:    {cat:"shp", label:"mod",   ins:["a","b"], d:[0,2], modes:M12, ex:(a,b)=>`mod(${a}, ${b})`},
   MIN:    {cat:"shp", label:"min",   ins:["a","b"], d:[0,0], ex:(a,b)=>`min(${a}, ${b})`},
   MAX:    {cat:"shp", label:"max",   ins:["a","b"], d:[0,0], ex:(a,b)=>`max(${a}, ${b})`},
   CLAMP:  {cat:"shp", label:"clamp", ins:["a","lo","hi"], d:[0,0,1], ex:(a,l,h)=>`clamp(${a}, ${l}, ${h})`},
   MIX:    {cat:"shp", label:"mix",   ins:["a","b","k"],   d:[0,1,.5],ex:(a,b,k)=>`mix(${a}, ${b}, ${k})`},
   SMOOTH: {cat:"shp", label:"smoothstep", ins:["e0","e1","a"], d:[0,1,0], ex:(e0,e1,a)=>`smoothstep(${e0}, ${e1}, ${a})`},
 
-  SAMPLE: {cat:"flw", label:"sample", ins:["f","at"],  fin:[0], d:[0,0]},
-  SHIFT:  {cat:"flw", label:"shift",  ins:["f","dx"],  fin:[0], d:[0,0.5]},
-  DIFF:   {cat:"flw", label:"d/dx",   ins:["f","h"],   fin:[0], d:[0,0.01]},
-  BLUR:   {cat:"flw", label:"blur",   ins:["f","w"],   fin:[0], d:[0,0.5]},
-  SUM:    {cat:"flw", label:"Σ loop", ins:["body","n"],fin:[0], d:[0,6]},
-  PROD:   {cat:"flw", label:"Π loop", ins:["body","n"],fin:[0], d:[1,4]},
+  VEC:    {cat:"vec", label:"vec (x,y)",  ins:["x","y"], d:[1,0], out:"v", modes:["la"]},
+  POLAR:  {cat:"vec", label:"polar (r,θ)",ins:["r","θ"], d:[1,0], out:"v", modes:["la"]},
+  VX:     {cat:"vec", label:"x of",  ins:["v"], tin:["v"], out:"s", modes:["la"]},
+  VY:     {cat:"vec", label:"y of",  ins:["v"], tin:["v"], out:"s", modes:["la"]},
+  VADD:   {cat:"vec", label:"v + v", ins:["a","b"], tin:["v","v"], out:"v", modes:["la"]},
+  VSUB:   {cat:"vec", label:"v − v", ins:["a","b"], tin:["v","v"], out:"v", modes:["la"]},
+  VSCALE: {cat:"vec", label:"scale s·v", ins:["s","v"], tin:["s","v"], d:[1,0], out:"v", modes:["la"]},
+  DOT:    {cat:"vec", label:"dot",   ins:["a","b"], tin:["v","v"], out:"s", modes:["la"]},
+  LEN:    {cat:"vec", label:"length",ins:["v"], tin:["v"], out:"s", modes:["la"]},
+  NORM:   {cat:"vec", label:"normalize", ins:["v"], tin:["v"], out:"v", modes:["la"]},
+  PROJ:   {cat:"vec", label:"project a→b", ins:["a","b"], tin:["v","v"], out:"v", modes:["la"]},
+  PERP:   {cat:"vec", label:"perp ⊥",ins:["v"], tin:["v"], out:"v", modes:["la"]},
 
-  GT:     {cat:"log", label:"greater", ins:["a","b"], d:[0,0]},
-  LT:     {cat:"log", label:"less",    ins:["a","b"], d:[0,0]},
-  GE:     {cat:"log", label:"≥",       ins:["a","b"], d:[0,0]},
-  LE:     {cat:"log", label:"≤",       ins:["a","b"], d:[0,0]},
-  EQ:     {cat:"log", label:"equal ≈", ins:["a","b","eps"], d:[0,0,0.001]},
-  NOT:    {cat:"log", label:"not ¬",   ins:["a"],     d:[0]},
-  AND:    {cat:"log", label:"and ∧",   ins:["a","b"], d:[0,0]},
-  OR:     {cat:"log", label:"or ∨",    ins:["a","b"], d:[0,0]},
-  XOR:    {cat:"log", label:"xor ⊕",   ins:["a","b"], d:[0,0]},
-  IF:     {cat:"log", label:"if",      ins:["c","a","b"], d:[0,1,0]},
+  ROT:    {cat:"mat", label:"rotate θ", ins:["θ"], d:[0.5], out:"m", modes:["la"]},
+  SCL2:   {cat:"mat", label:"scale (sx,sy)", ins:["sx","sy"], d:[1,1], out:"m", modes:["la"]},
+  SHEAR:  {cat:"mat", label:"shear (kx,ky)", ins:["kx","ky"], d:[0.5,0], out:"m", modes:["la"]},
+  MAT:    {cat:"mat", label:"matrix", ins:["îx","îy","ĵx","ĵy"], d:[1,0,0,1], out:"m", modes:["la"]},
+  MV:     {cat:"mat", label:"M · v", ins:["M","v"], tin:["m","v"], out:"v", modes:["la"]},
+  MM:     {cat:"mat", label:"M · N", ins:["M","N"], tin:["m","m"], out:"m", modes:["la"]},
+  DET:    {cat:"mat", label:"det",   ins:["M"], tin:["m"], out:"s", modes:["la"]},
+  INV:    {cat:"mat", label:"inverse", ins:["M"], tin:["m"], out:"m", modes:["la"]},
+  MMIX:   {cat:"mat", label:"mat mix", ins:["M","N","k"], tin:["m","m","s"], d:[0,0,0.5], out:"m", modes:["la"]},
+
+  SAMPLE: {cat:"flw", label:"sample", ins:["f","at"],  fin:[0], d:[0,0],   modes:M12},
+  SHIFT:  {cat:"flw", label:"shift",  ins:["f","dx"],  fin:[0], d:[0,0.5], modes:M12},
+  DIFF:   {cat:"flw", label:"d/dx",   ins:["f","h"],   fin:[0], d:[0,0.01],modes:M12},
+  BLUR:   {cat:"flw", label:"blur",   ins:["f","w"],   fin:[0], d:[0,0.5], modes:M12},
+  SUM:    {cat:"flw", label:"Σ loop", ins:["body","n"],fin:[0], d:[0,6],   modes:M12},
+  PROD:   {cat:"flw", label:"Π loop", ins:["body","n"],fin:[0], d:[1,4],   modes:M12},
+
+  GT:     {cat:"log", label:"greater", ins:["a","b"], d:[0,0], modes:M12},
+  LT:     {cat:"log", label:"less",    ins:["a","b"], d:[0,0], modes:M12},
+  GE:     {cat:"log", label:"≥",       ins:["a","b"], d:[0,0], modes:M12},
+  LE:     {cat:"log", label:"≤",       ins:["a","b"], d:[0,0], modes:M12},
+  EQ:     {cat:"log", label:"equal ≈", ins:["a","b","eps"], d:[0,0,0.001], modes:M12},
+  NOT:    {cat:"log", label:"not ¬",   ins:["a"],     d:[0],   modes:M12},
+  AND:    {cat:"log", label:"and ∧",   ins:["a","b"], d:[0,0], modes:M12},
+  OR:     {cat:"log", label:"or ∨",    ins:["a","b"], d:[0,0], modes:M12},
+  XOR:    {cat:"log", label:"xor ⊕",   ins:["a","b"], d:[0,0], modes:M12},
+  IF:     {cat:"log", label:"if",      ins:["c","a","b"], d:[0,1,0], modes:M12},
 
   COMMENT:{cat:"ann", label:"comment", ins:[], noOut:true, isAnn:true},
   FRAME:  {cat:"ann", label:"frame",   ins:[], noOut:true, isAnn:true},
 
-  PLOT:   {cat:"out", label:"plot",    ins:["y"],      noOut:true, d:[0],   modes:["1d"],  ex:(y)=>y},
-  PLOT2:  {cat:"out", label:"plot xy", ins:["x","y"],  noOut:true, d:[0,0], modes:["par"]},
+  PLOT:   {cat:"out", label:"plot",     ins:["y"],       noOut:true, d:[0],   modes:["1d"],  ex:(y)=>y},
+  PLOT2:  {cat:"out", label:"plot xy",  ins:["x","y"],   noOut:true, d:[0,0], modes:["par"]},
+  DRAWV:  {cat:"out", label:"draw vec", ins:["v","at"],  noOut:true, tin:["v","v"], modes:["la"]},
+  DRAWM:  {cat:"out", label:"draw mat", ins:["M"],       noOut:true, tin:["m"],     modes:["la"]},
 };
 function fmtNum(v){ const s = Number(v.toPrecision(6)).toString(); return v<0?`(${s})`:s; }
+function fmtFull(v){ const s = String(v); return v<0?`(${s})`:s; }   // compiler: no display rounding
+function portType(def,i){ return (def.tin && def.tin[i]) || "s"; }
+function outTypeOf(def){ return def.out || "s"; }
 
 /* ---------------- graph model ---------------- */
 let nodes = [];
@@ -319,9 +370,14 @@ function reaches(a, b){
   if (a===b) return true;
   return wires.filter(w=>w.from===a).some(w=>reaches(w.to,b));
 }
+function canConnect(from, to, port){
+  const fd = DEFS[nodeById(from).type], td = DEFS[nodeById(to).type];
+  return outTypeOf(fd) === portType(td, port);
+}
 function connect(from, to, port){
   if (from===to) return;
   if (reaches(to, from)) return;
+  if (!canConnect(from, to, port)) return;
   wires = wires.filter(w=>!(w.to===to && w.port===port));
   wires.push({from,to,port});
 }
@@ -441,7 +497,7 @@ function placeNode(type, wx, wy){
 
 /* ---------------- save / load graph ---------------- */
 function serializeGraph(){
-  return JSON.stringify({app:"function-loom", v:8, mode:MODE, tDom:{...tDom},
+  return JSON.stringify({app:"function-loom", v:9, mode:MODE, tDom:{...tDom},
     nodes:nodes.map(n=>{
       const o={id:n.id,type:n.type,x:Math.round(n.x),y:Math.round(n.y),val:n.val};
       if (n.text!==undefined) o.text=n.text;
@@ -472,14 +528,16 @@ function loadGraphObject(o){
   selId=-1; selWire=null;
   endAction();
   if (o.tDom && isFinite(o.tDom.a) && isFinite(o.tDom.b)) tDom={a:o.tDom.a,b:o.tDom.b};
-  setMode(o.mode==="par" ? "par" : "1d", true);
+  setMode(["par","la"].includes(o.mode) ? o.mode : "1d", true);
   gpan={x:0,y:0}; gscale=1;
   updateInspector(); drawAll();
   return true;
 }
 function nodesTypeOk(ns,w){
   const to = ns.find(n=>n.id===w.to);
-  return to && w.port>=0 && w.port < DEFS[to.type].ins.length;
+  const fr = ns.find(n=>n.id===w.from);
+  return to && fr && w.port>=0 && w.port < DEFS[to.type].ins.length
+      && outTypeOf(DEFS[fr.type]) === portType(DEFS[to.type], w.port);
 }
 function saveGraphFile(){
   const blob = new Blob([serializeGraph()], {type:"application/json"});
@@ -501,11 +559,17 @@ fileIn.addEventListener("change", ()=>{
 
 /* ---------------- compile ---------------- */
 function isFnIn(def,i){ return (def.fin||[]).includes(i); }
+function typedDefault(def,i){
+  const ty = portType(def,i);
+  if (ty==="v") return "[0,0]";
+  if (ty==="m") return "[1,0,0,1]";
+  return fmtFull(def.d ? def.d[i] : 0);
+}
 function callArg(nid, i){
   const def = DEFS[nodeById(nid).type];
   const w = wireInto(nid, i);
   if (w) return isFnIn(def,i) ? `n${w.from}` : `n${w.from}(x,t,i)`;
-  return isFnIn(def,i) ? `((x,t,i)=>0)` : fmtNum(def.d[i]);
+  return isFnIn(def,i) ? `((x,t,i)=>0)` : typedDefault(def,i);
 }
 function localExpr(nid){
   const n = nodeById(nid), def = DEFS[n.type];
@@ -514,7 +578,7 @@ function localExpr(nid){
     case "X":     return "x";
     case "TIME":  return "t";
     case "INDEX": return "i";
-    case "CONST": return fmtNum(n.val);
+    case "CONST": return fmtFull(n.val);
     case "SAMPLE":return `(${A[0]})((${A[1]}), t, i)`;
     case "SHIFT": return `(${A[0]})(x - (${A[1]}), t, i)`;
     case "DIFF":  return `((h)=>((${A[0]})(x+h,t,i) - (${A[0]})(x-h,t,i)) / (2*h))(${A[1]})`;
@@ -531,6 +595,29 @@ function localExpr(nid){
     case "OR":    return `(((${A[0]}) > 0.5 || (${A[1]}) > 0.5) ? 1 : 0)`;
     case "XOR":   return `((((${A[0]}) > 0.5) !== ((${A[1]}) > 0.5)) ? 1 : 0)`;
     case "IF":    return `((${A[0]}) > 0.5 ? (${A[1]}) : (${A[2]}))`;
+    case "VEC":   return `[${A[0]}, ${A[1]}]`;
+    case "POLAR": return `((r,th)=>[r*Math.cos(th), r*Math.sin(th)])(${A[0]}, ${A[1]})`;
+    case "VX":    return `(${A[0]})[0]`;
+    case "VY":    return `(${A[0]})[1]`;
+    case "VADD":  return `vadd(${A[0]}, ${A[1]})`;
+    case "VSUB":  return `vsub(${A[0]}, ${A[1]})`;
+    case "VSCALE":return `vscale(${A[0]}, ${A[1]})`;
+    case "DOT":   return `dot2(${A[0]}, ${A[1]})`;
+    case "LEN":   return `len2(${A[0]})`;
+    case "NORM":  return `norm2(${A[0]})`;
+    case "PROJ":  return `proj2(${A[0]}, ${A[1]})`;
+    case "PERP":  return `perp2(${A[0]})`;
+    case "ROT":   return `rot2(${A[0]})`;
+    case "SCL2":  return `scl2(${A[0]}, ${A[1]})`;
+    case "SHEAR": return `shr2(${A[0]}, ${A[1]})`;
+    case "MAT":   return `[${A[0]}, ${A[2]}, ${A[1]}, ${A[3]}]`;
+    case "MV":    return `mv(${A[0]}, ${A[1]})`;
+    case "MM":    return `mm(${A[0]}, ${A[1]})`;
+    case "DET":   return `det2(${A[0]})`;
+    case "INV":   return `inv2(${A[0]})`;
+    case "MMIX":  return `mmix(${A[0]}, ${A[1]}, ${A[2]})`;
+    case "DRAWV": return A[0];
+    case "DRAWM": return A[0];
     case "COMMENT": case "FRAME": return "0";
     case "PLOT2": return A[0];
     default:      return def.ex(...A);
@@ -553,10 +640,14 @@ function compile(id){
   try { return new Function(PRE + code + `return n${id};`)(); }
   catch(e){ return ()=>NaN; }
 }
-function compileInput(nid, i){   // compile whatever feeds port i (or its default)
+function compileInput(nid, i){
   const w = wireInto(nid, i);
   if (w) return compile(w.from);
-  const v = DEFS[nodeById(nid).type].d[i];
+  const def = DEFS[nodeById(nid).type];
+  const ty = portType(def,i);
+  if (ty==="v") return ()=>[0,0];
+  if (ty==="m") return ()=>[1,0,0,1];
+  const v = def.d ? def.d[i] : 0;
   return ()=>v;
 }
 
@@ -564,7 +655,11 @@ function compileInput(nid, i){   // compile whatever feeds port i (or its defaul
 function pArg(nid, i, xn){
   const def = DEFS[nodeById(nid).type];
   const w = wireInto(nid, i);
-  return w ? pexpr(w.from, xn) : fmtNum(def.d[i]);
+  if (w) return pexpr(w.from, xn);
+  const ty = portType(def,i);
+  if (ty==="v") return "(0, 0)";
+  if (ty==="m") return "I";
+  return fmtNum(def.d ? def.d[i] : 0);
 }
 function pexpr(id, xn, depth){
   depth = (depth||0)+1; if (depth>60) return "…";
@@ -592,6 +687,31 @@ function pexpr(id, xn, depth){
     case "OR":    return `(${pArg(id,0,xn)} ∨ ${pArg(id,1,xn)})`;
     case "XOR":   return `(${pArg(id,0,xn)} ⊕ ${pArg(id,1,xn)})`;
     case "IF":    return `(${pArg(id,0,xn)} ? ${pArg(id,1,xn)} : ${pArg(id,2,xn)})`;
+    case "VEC":   return `(${pArg(id,0,xn)}, ${pArg(id,1,xn)})`;
+    case "POLAR": return `polar(${pArg(id,0,xn)}, ${pArg(id,1,xn)})`;
+    case "VX":    return `x(${pArg(id,0,xn)})`;
+    case "VY":    return `y(${pArg(id,0,xn)})`;
+    case "VADD":  return `(${pArg(id,0,xn)} + ${pArg(id,1,xn)})`;
+    case "VSUB":  return `(${pArg(id,0,xn)} − ${pArg(id,1,xn)})`;
+    case "VSCALE":return `(${pArg(id,0,xn)} · ${pArg(id,1,xn)})`;
+    case "DOT":   return `(${pArg(id,0,xn)} · ${pArg(id,1,xn)})`;
+    case "LEN":   return `|${pArg(id,0,xn)}|`;
+    case "NORM":  return `norm(${pArg(id,0,xn)})`;
+    case "PROJ":  return `proj_{${pArg(id,1,xn)}}(${pArg(id,0,xn)})`;
+    case "PERP":  return `⊥(${pArg(id,0,xn)})`;
+    case "ROT":   return `R(${pArg(id,0,xn)})`;
+    case "SCL2":  return `S(${pArg(id,0,xn)}, ${pArg(id,1,xn)})`;
+    case "SHEAR": return `K(${pArg(id,0,xn)}, ${pArg(id,1,xn)})`;
+    case "MAT":   return `[[${pArg(id,0,xn)} ${pArg(id,2,xn)}][${pArg(id,1,xn)} ${pArg(id,3,xn)}]]`;
+    case "MV":    return `(${pArg(id,0,xn)} · ${pArg(id,1,xn)})`;
+    case "MM":    return `(${pArg(id,0,xn)} · ${pArg(id,1,xn)})`;
+    case "DET":   return `det(${pArg(id,0,xn)})`;
+    case "INV":   return `(${pArg(id,0,xn)})⁻¹`;
+    case "MMIX":  return `mix(${pArg(id,0,xn)}, ${pArg(id,1,xn)}, ${pArg(id,2,xn)})`;
+    case "DRAWV": return wireInto(id,1)
+                    ? `${pArg(id,0,xn)}  ⟨at ${pArg(id,1,xn)}⟩`
+                    : pArg(id,0,xn);
+    case "DRAWM": return pArg(id,0,xn);
     case "PLOT":  return pArg(id,0,xn);
     case "PLOT2": return `( ${pArg(id,0,xn)} , ${pArg(id,1,xn)} )`;
     default:      return def.ex(...def.ins.map((_,i)=>pArg(id,i,xn)));
@@ -616,11 +736,11 @@ let GW=0,GH=0,PW=0,PH=0;
 function resize(){
   ({w:GW,h:GH} = sizeCanvas(gc));
   ({w:PW,h:PH} = sizeCanvas(pc));
-  if (MODE==="par") lockAspect();
+  if (MODE!=="1d") lockAspect();
   drawAll();
 }
 window.addEventListener("resize", resize);
-function lockAspect(){       // 1 unit x = 1 unit y in pixels
+function lockAspect(){
   if (!PW || !PH) return;
   const cy = (view.y0+view.y1)/2;
   const yr = (view.x1-view.x0)*PH/PW;
@@ -658,12 +778,19 @@ function inPortPos(n,i){ return {x:n.x, y:n.y+26+i*18+7}; }
 function outPortPos(n){ return {x:n.x+NW, y:n.y+nodeH(n)/2}; }
 function nodeTitle(n){
   if (n.type==="X")    return MODE==="par" ? "param t" : "x";
-  if (n.type==="TIME") return MODE==="par" ? "time τ"  : "time";
+  if (n.type==="TIME") return MODE==="1d" ? "time" : "time τ";
   const def = DEFS[n.type];
   return def.hasVal ? fmtNum(n.val) : def.label;
 }
 function inactivePlot(n){
-  return (n.type==="PLOT" && MODE!=="1d") || (n.type==="PLOT2" && MODE!=="par");
+  const m = PLOT_OF_MODE[n.type];
+  return m !== undefined && m !== MODE;
+}
+function typeColor(ty){
+  return ty==="v" ? TH.vec : ty==="m" ? TH.mat : TH.portVal;
+}
+function typeWire(ty){
+  return ty==="v" ? TH.vec : ty==="m" ? TH.mat : TH.wireVal;
 }
 
 function drawGraph(){
@@ -698,11 +825,13 @@ function drawGraph(){
 
   if (selWire && !wires.includes(selWire)) selWire=null;
   for(const w of wires){
-    const toN = nodeById(w.to);
+    const toN = nodeById(w.to), frN = nodeById(w.from);
     const fnWire = isFnIn(DEFS[toN.type], w.port);
-    const a = outPortPos(nodeById(w.from)), b = inPortPos(toN, w.port);
+    const ty = outTypeOf(DEFS[frN.type]);
+    const a = outPortPos(frN), b = inPortPos(toN, w.port);
     if (w===selWire) drawWire(c, a, b, TH.wireDrag, 3);
-    else drawWire(c, a, b, fnWire ? TH.wireFn : TH.wireVal, fnWire ? 2.4 : 1.8);
+    else if (fnWire) drawWire(c, a, b, TH.wireFn, 2.4);
+    else drawWire(c, a, b, typeWire(ty), ty==="s" ? 1.8 : 2.4);
   }
   if (drag.kind==="wire"){
     const a = drag.fromOut ? outPortPos(nodeById(drag.node)) : {x:drag.mx,y:drag.my};
@@ -738,8 +867,10 @@ function drawGraph(){
     c.strokeStyle = sel ? TH.nodeSel : TH.nodeStroke;
     c.lineWidth = sel ? 2.4 : 1.6;
     rr(c, n.x, n.y, NW, h, 4); c.fill(); c.stroke();
-    c.fillStyle = (n.type==="PLOT"||n.type==="PLOT2") ? plotColor(n.id)
-                : (def.cat==="flw" ? TH.flowTitle : TH.title);
+    const oty = outTypeOf(def);
+    c.fillStyle = PLOT_OF_MODE[n.type]!==undefined ? plotColor(n.id)
+                : (def.cat==="flw" ? TH.flowTitle
+                : oty==="v" ? TH.vec : oty==="m" ? TH.mat : TH.title);
     c.font = "12px Iowan Old Style, Palatino, Georgia, serif";
     c.textAlign="center"; c.textBaseline="middle";
     c.fillText(nodeTitle(n), n.x+NW/2, n.y+13);
@@ -749,11 +880,19 @@ function drawGraph(){
     def.ins.forEach((name,i)=>{
       const p = inPortPos(n,i);
       const fnPort = isFnIn(def,i);
-      dot(c, p.x, p.y, wireInto(n.id,i) ? (fnPort?TH.portFn:TH.portVal) : TH.portEmpty, fnPort);
+      const pty = portType(def,i);
+      const wired = wireInto(n.id,i);
+      const col = !wired ? TH.portEmpty : fnPort ? TH.portFn : typeColor(pty);
+      const shape = fnPort ? "sq" : pty==="v" ? "dm" : pty==="m" ? "sq" : "";
+      dot(c, p.x, p.y, col, shape);
       c.fillStyle=TH.label; c.textAlign="left";
       c.fillText(name, p.x+8, p.y);
     });
-    if (!def.noOut){ const p = outPortPos(n); dot(c, p.x, p.y, TH.portOut); }
+    if (!def.noOut){
+      const p = outPortPos(n);
+      const shape = oty==="v" ? "dm" : oty==="m" ? "sq" : "";
+      dot(c, p.x, p.y, TH.portOut, shape);
+    }
     c.globalAlpha = 1;
   }
 }
@@ -763,9 +902,13 @@ function plotColor(id){
   return TH.plotCols[cohort.indexOf(id) % TH.plotCols.length];
 }
 function rr(c,x,y,w,h,r){ c.beginPath(); c.roundRect(x,y,w,h,r); }
-function dot(c,x,y,col,square){
-  if (square){ c.fillStyle=col; c.fillRect(x-4,y-4,8,8);
+function dot(c,x,y,col,shape){
+  if (shape==="sq"){ c.fillStyle=col; c.fillRect(x-4,y-4,8,8);
     c.strokeStyle=TH.css.stage; c.lineWidth=1; c.strokeRect(x-4,y-4,8,8); return; }
+  if (shape==="dm"){ c.beginPath();
+    c.moveTo(x,y-5.4); c.lineTo(x+5.4,y); c.lineTo(x,y+5.4); c.lineTo(x-5.4,y);
+    c.closePath(); c.fillStyle=col; c.fill();
+    c.strokeStyle=TH.css.stage; c.lineWidth=1; c.stroke(); return; }
   c.beginPath(); c.arc(x,y,4.4,0,7); c.fillStyle=col; c.fill();
   c.strokeStyle=TH.css.stage; c.lineWidth=1; c.stroke();
 }
@@ -781,6 +924,8 @@ function drawWire(c,a,b,col,w,dash){
 let view = {x0:-3.4, x1:3.4, y0:-2.2, y1:2.2};
 function xToPx(x){ return (x-view.x0)/(view.x1-view.x0)*PW; }
 function yToPx(y){ return PH - (y-view.y0)/(view.y1-view.y0)*PH; }
+function pxToX(px){ return view.x0 + px/PW*(view.x1-view.x0); }
+function pxToY(py){ return view.y0 + (PH-py)/PH*(view.y1-view.y0); }
 function niceStep(range, px, target){
   const raw = range/(px/target);
   const p = Math.pow(10, Math.floor(Math.log10(raw)));
@@ -809,23 +954,21 @@ function drawPlot(){
   c.beginPath(); c.moveTo(xToPx(0),0); c.lineTo(xToPx(0),PH); c.stroke();
 
   const sel = nodeById(selId);
-  if (sel && sel.type!=="PLOT" && sel.type!=="PLOT2" && !DEFS[sel.type].isAnn){
-    const fn = compile(selId);
-    if (MODE==="par") traceDom(c, fn, TH.ghost, 1.4, [5,4]);
-    else trace(c, fn, TH.ghost, 1.4, [5,4]);
-  }
-  if (MODE==="par"){
-    for(const p of nodes.filter(n=>n.type==="PLOT2")){
+  const ghostOK = sel && !DEFS[sel.type].noOut && !DEFS[sel.type].isAnn;
+  if (MODE==="la"){
+    drawPlaneLA(c, sel, ghostOK);
+  } else if (MODE==="par"){
+    if (ghostOK) traceDom(c, compile(selId), TH.ghost, 1.4, [5,4]);
+    for(const p of nodes.filter(n=>n.type==="PLOT2"))
       trace2(c, compileInput(p.id,0), compileInput(p.id,1), plotColor(p.id), 2.2);
-    }
   } else {
-    for(const p of nodes.filter(n=>n.type==="PLOT")){
+    if (ghostOK) trace(c, compile(selId), TH.ghost, 1.4, [5,4]);
+    for(const p of nodes.filter(n=>n.type==="PLOT"))
       trace(c, compile(p.id), plotColor(p.id), 2.2);
-    }
   }
 }
 function trim(v){ const s = v.toPrecision(3); return parseFloat(s).toString(); }
-function trace(c, fn, col, w, dash){          // y = f(x) over visible x
+function trace(c, fn, col, w, dash){
   c.strokeStyle=col; c.lineWidth=w; if(dash) c.setLineDash(dash);
   const N = 420, yr = view.y1-view.y0;
   c.beginPath(); let pen=false, py=0;
@@ -840,7 +983,7 @@ function trace(c, fn, col, w, dash){          // y = f(x) over visible x
   }
   c.stroke(); c.setLineDash([]);
 }
-function traceDom(c, fn, col, w, dash){       // y = f(u) over u in tDom (ghost in par mode)
+function traceDom(c, fn, col, w, dash){
   c.strokeStyle=col; c.lineWidth=w; if(dash) c.setLineDash(dash);
   const N = 420, yr = view.y1-view.y0;
   c.beginPath(); let pen=false, py=0;
@@ -855,7 +998,7 @@ function traceDom(c, fn, col, w, dash){       // y = f(u) over u in tDom (ghost 
   }
   c.stroke(); c.setLineDash([]);
 }
-function trace2(c, fx, fy, col, w){           // ( x(u), y(u) ) over u in tDom
+function trace2(c, fx, fy, col, w){
   c.strokeStyle=col; c.lineWidth=w;
   const N = 800;
   const xr = view.x1-view.x0, yr = view.y1-view.y0;
@@ -876,18 +1019,200 @@ function trace2(c, fx, fy, col, w){           // ( x(u), y(u) ) over u in tDom
   c.stroke();
 }
 
+/* ---------------- linear algebra plane ---------------- */
+function arrowPx(c, x0,y0, x1,y1, col, w, hollow, dash){
+  if (Math.hypot(x1-x0,y1-y0) < 2) return;
+  c.strokeStyle=col; c.fillStyle=col; c.lineWidth=w;
+  if (dash) c.setLineDash([5,4]);
+  c.beginPath(); c.moveTo(x0,y0); c.lineTo(x1,y1); c.stroke();
+  c.setLineDash([]);
+  const ang=Math.atan2(y1-y0,x1-x0), L=10, A=0.46;
+  const ax=x1-L*Math.cos(ang-A), ay=y1-L*Math.sin(ang-A);
+  const bx=x1-L*Math.cos(ang+A), by=y1-L*Math.sin(ang+A);
+  c.beginPath(); c.moveTo(x1,y1); c.lineTo(ax,ay); c.lineTo(bx,by); c.closePath();
+  if (hollow){ c.lineWidth=1.6; if(dash)c.setLineDash([5,4]); c.stroke(); c.setLineDash([]); }
+  else c.fill();
+}
+function drawLatticePx(c, m, col, alpha, dash){
+  const G = 8;
+  c.save();
+  c.globalAlpha = alpha;
+  c.strokeStyle = col; c.lineWidth = 1;
+  if (dash) c.setLineDash([4,4]);
+  for(let u=-G; u<=G; u++){
+    let a=[m[0]*u+m[1]*(-G), m[2]*u+m[3]*(-G)];
+    let b=[m[0]*u+m[1]*( G), m[2]*u+m[3]*( G)];
+    c.beginPath(); c.moveTo(xToPx(a[0]),yToPx(a[1]));
+    c.lineTo(xToPx(b[0]),yToPx(b[1])); c.stroke();
+    a=[m[0]*(-G)+m[1]*u, m[2]*(-G)+m[3]*u];
+    b=[m[0]*( G)+m[1]*u, m[2]*( G)+m[3]*u];
+    c.beginPath(); c.moveTo(xToPx(a[0]),yToPx(a[1]));
+    c.lineTo(xToPx(b[0]),yToPx(b[1])); c.stroke();
+  }
+  c.restore();
+}
+function drawMatPx(c, m, col, ghost, withHandles){
+  if (!m.every(isFinite)) return;
+  drawLatticePx(c, m, col, ghost?0.35:0.5, ghost);
+  // unit square
+  const P=[[0,0],[1,0],[1,1],[0,1]].map(q=>[m[0]*q[0]+m[1]*q[1], m[2]*q[0]+m[3]*q[1]]);
+  c.save();
+  c.globalAlpha = ghost?0.10:0.16; c.fillStyle=col;
+  c.beginPath(); c.moveTo(xToPx(P[0][0]),yToPx(P[0][1]));
+  for(let k=1;k<4;k++) c.lineTo(xToPx(P[k][0]),yToPx(P[k][1]));
+  c.closePath(); c.fill();
+  c.restore();
+  // basis arrows: î = (m00,m10), ĵ = (m01,m11)
+  const O=[xToPx(0),yToPx(0)];
+  arrowPx(c, O[0],O[1], xToPx(m[0]),yToPx(m[2]), col, 3, false, ghost);
+  arrowPx(c, O[0],O[1], xToPx(m[1]),yToPx(m[3]), col, 3, false, ghost);
+  c.fillStyle=col; c.font="italic 11px Iowan Old Style, Palatino, Georgia, serif";
+  c.textAlign="left"; c.textBaseline="bottom";
+  c.fillText("î", xToPx(m[0])+5, yToPx(m[2])-4);
+  c.fillText("ĵ", xToPx(m[1])+5, yToPx(m[3])-4);
+  if (withHandles){
+    for(const q of [[m[0],m[2]],[m[1],m[3]]]){
+      c.beginPath(); c.arc(xToPx(q[0]),yToPx(q[1]),5,0,7);
+      c.fillStyle=col; c.fill();
+      c.strokeStyle=TH.plotBg; c.lineWidth=1.4; c.stroke();
+    }
+  }
+}
+function drawPlaneLA(c, sel, ghostOK){
+  for(const dn of nodes.filter(n=>n.type==="DRAWM")){
+    let m; try{ m = compileInput(dn.id,0)(0,t,0); }catch(e){ continue; }
+    if (!Array.isArray(m)) continue;
+    drawMatPx(c, m, plotColor(dn.id), false, !!matHandles(dn.id));
+  }
+  for(const dn of nodes.filter(n=>n.type==="DRAWV")){
+    let v, at;
+    try{ v = compileInput(dn.id,0)(0,t,0); at = compileInput(dn.id,1)(0,t,0); }
+    catch(e){ continue; }
+    if (!Array.isArray(v) || !Array.isArray(at)) continue;
+    if (![...v,...at].every(isFinite)) continue;
+    const col = plotColor(dn.id);
+    const drag_ = !!vecHandle(dn.id);
+    arrowPx(c, xToPx(at[0]),yToPx(at[1]),
+               xToPx(at[0]+v[0]),yToPx(at[1]+v[1]), col, 2.4, !drag_);
+    if (drag_){
+      c.beginPath(); c.arc(xToPx(at[0]+v[0]),yToPx(at[1]+v[1]),5,0,7);
+      c.fillStyle=col; c.fill();
+      c.strokeStyle=TH.plotBg; c.lineWidth=1.4; c.stroke();
+    }
+  }
+  if (ghostOK){
+    const oty = outTypeOf(DEFS[sel.type]);
+    try{
+      if (oty==="v"){
+        const v = compile(selId)(0,t,0);
+        if (Array.isArray(v) && v.every(isFinite))
+          arrowPx(c, xToPx(0),yToPx(0), xToPx(v[0]),yToPx(v[1]),
+                  TH.ghost, 1.6, false, true);
+      } else if (oty==="m"){
+        const m = compile(selId)(0,t,0);
+        if (Array.isArray(m) && m.every(isFinite))
+          drawMatPx(c, m, TH.ghost, true, false);
+      }
+    }catch(e){}
+  }
+}
+
+/* ---------------- tip dragging (la) ---------------- */
+function constFeeding(nid, port){
+  const w = wireInto(nid, port); if(!w) return null;
+  const s = nodeById(w.from);
+  return (s && s.type==="CONST") ? s : null;
+}
+function vecHandle(drawId){
+  const w = wireInto(drawId,0); if(!w) return null;
+  const src = nodeById(w.from);
+  if (src.type==="VEC"){
+    const cx=constFeeding(src.id,0), cy=constFeeding(src.id,1);
+    if (cx&&cy) return {kind:"vec", cx, cy};
+  } else if (src.type==="POLAR"){
+    const cr=constFeeding(src.id,0), cth=constFeeding(src.id,1);
+    if (cr&&cth) return {kind:"polar", cr, cth};
+  }
+  return null;
+}
+function matHandles(drawId){
+  const w = wireInto(drawId,0); if(!w) return null;
+  const src = nodeById(w.from);
+  if (src.type!=="MAT") return null;
+  const cs=[0,1,2,3].map(i=>constFeeding(src.id,i));
+  if (cs.every(Boolean)) return {ix:cs[0],iy:cs[1],jx:cs[2],jy:cs[3]};
+  return null;
+}
+function planeHandleAt(sx, sy){
+  if (MODE!=="la") return null;
+  const R = 16;
+  for(const dn of nodes.filter(n=>n.type==="DRAWM")){
+    const hs = matHandles(dn.id); if(!hs) continue;
+    let m; try{ m = compileInput(dn.id,0)(0,t,0); }catch(e){ continue; }
+    if (Math.hypot(xToPx(m[0])-sx, yToPx(m[2])-sy) < R)
+      return {set:(wx,wy)=>{ hs.ix.val=wx; hs.iy.val=wy; }};
+    if (Math.hypot(xToPx(m[1])-sx, yToPx(m[3])-sy) < R)
+      return {set:(wx,wy)=>{ hs.jx.val=wx; hs.jy.val=wy; }};
+  }
+  for(const dn of nodes.filter(n=>n.type==="DRAWV")){
+    const h = vecHandle(dn.id); if(!h) continue;
+    let v, at;
+    try{ v = compileInput(dn.id,0)(0,t,0); at = compileInput(dn.id,1)(0,t,0); }
+    catch(e){ continue; }
+    if (Math.hypot(xToPx(at[0]+v[0])-sx, yToPx(at[1]+v[1])-sy) < R){
+      const id = dn.id;
+      return {set:(wx,wy)=>{
+        let a; try{ a = compileInput(id,1)(0,t,0); }catch(e){ a=[0,0]; }
+        const rx = wx-a[0], ry = wy-a[1];
+        if (h.kind==="vec"){ h.cx.val=rx; h.cy.val=ry; }
+        else { h.cr.val=Math.hypot(rx,ry); h.cth.val=Math.atan2(ry,rx); }
+      }};
+    }
+  }
+  return null;
+}
+let hdrag = null;
+
 /* ---------------- expression readout ---------------- */
 const exprEl = document.getElementById("expr");
+function activeDefaultOutput(){
+  if (MODE==="la") return nodes.find(n=>n.type==="DRAWV"||n.type==="DRAWM");
+  const ty = MODE==="par" ? "PLOT2" : "PLOT";
+  return nodes.find(n=>n.type===ty);
+}
 function updateExpr(){
   const sel = nodeById(selId);
   const useSel = sel && !DEFS[sel.type].isAnn;
-  let id = useSel ? selId
-    : (nodes.find(n=>n.type===activePlotType())||{}).id;
-  if (id===undefined){ exprEl.innerHTML=""; return; }
-  const nd = nodeById(id);
+  const nd = useSel ? sel : activeDefaultOutput();
+  if (!nd){ exprEl.innerHTML=""; return; }
+  const id = nd.id;
   const who = useSel ? (DEFS[sel.type].label + " node") : "plot 1";
-  const lhs = (nd.type==="PLOT2") ? "(x, y) = " : "y = ";
-  exprEl.innerHTML = `<span class="who">${who} · ${lhs}</span>${prettyOf(id)}`;
+  const lhs = nd.type==="PLOT2" ? "(x, y) = "
+            : nd.type==="DRAWV" ? "v = "
+            : nd.type==="DRAWM" ? "M = "
+            : "y = ";
+  let suffix = "";
+  if (MODE==="la"){
+    try{
+      const def = DEFS[nd.type];
+      if (nd.type==="DRAWV"){
+        const v = compileInput(id,0)(0,t,0);
+        suffix = `  =  (${trim(v[0])}, ${trim(v[1])})`;
+      } else if (nd.type==="DRAWM"){
+        const m = compileInput(id,0)(0,t,0);
+        suffix = `  ·  det = ${trim(m[0]*m[3]-m[1]*m[2])}`;
+      } else if (outTypeOf(def)==="s"){
+        suffix = `  =  ${trim(compile(id)(0,t,0))}`;
+      } else if (outTypeOf(def)==="v"){
+        const v = compile(id)(0,t,0);
+        suffix = `  =  (${trim(v[0])}, ${trim(v[1])})`;
+      } else if (outTypeOf(def)==="m"){
+        const m = compile(id)(0,t,0);
+        suffix = `  ·  det = ${trim(m[0]*m[3]-m[1]*m[2])}`;
+      }
+    }catch(e){}
+  }
+  exprEl.innerHTML = `<span class="who">${who} · ${lhs}</span>${prettyOf(id)}${suffix}`;
 }
 
 /* ---------------- inspector ---------------- */
@@ -944,16 +1269,21 @@ let drag = {kind:null};
 const gptrs = new Map();
 function gpos(e){ const r=gc.getBoundingClientRect();
   return {x:(e.clientX-r.left-gpan.x)/gscale, y:(e.clientY-r.top-gpan.y)/gscale}; }
-function hitPort(p, want){
+function hitPort(p, want, wtype){
   const R = 18/gscale; let best=null, bd=R*R;
   for(const n of nodes){
     const def = DEFS[n.type];
     if (def.isAnn) continue;
-    if (!def.noOut && want!=="in"){ const o=outPortPos(n);
-      const d=(p.x-o.x)**2+(p.y-o.y)**2;
-      if (d<bd){ bd=d; best={node:n.id, out:true, d2:d}; } }
+    if (!def.noOut && want!=="in"){
+      if (!wtype || outTypeOf(def)===wtype){
+        const o=outPortPos(n);
+        const d=(p.x-o.x)**2+(p.y-o.y)**2;
+        if (d<bd){ bd=d; best={node:n.id, out:true, d2:d}; } } }
     if (want!=="out")
-      for(let i=0;i<def.ins.length;i++){ const q=inPortPos(n,i);
+      for(let i=0;i<def.ins.length;i++){
+        const need = isFnIn(def,i) ? "s" : portType(def,i);
+        if (wtype && need!==wtype) continue;
+        const q=inPortPos(n,i);
         const d=(p.x-q.x)**2+(p.y-q.y)**2;
         if (d<bd){ bd=d; best={node:n.id, out:false, port:i, d2:d}; } }
   }
@@ -995,12 +1325,19 @@ gc.addEventListener("pointerdown", e=>{
   }
   if (useWire){
     beginAction();
-    if (port.out){ drag={kind:"wire", fromOut:true, node:port.node, mx:p.x,my:p.y}; }
-    else {
+    if (port.out){
+      const wtype = outTypeOf(DEFS[nodeById(port.node).type]);
+      drag={kind:"wire", fromOut:true, node:port.node, wtype, mx:p.x,my:p.y};
+    } else {
       const w = wireInto(port.node, port.port);
       if (w){ wires = wires.filter(q=>q!==w);
-        drag={kind:"wire", fromOut:true, node:w.from, mx:p.x,my:p.y};
-      } else drag={kind:"wire", fromOut:false, node:port.node, port:port.port, mx:p.x,my:p.y};
+        const wtype = outTypeOf(DEFS[nodeById(w.from).type]);
+        drag={kind:"wire", fromOut:true, node:w.from, wtype, mx:p.x,my:p.y};
+      } else {
+        const td = DEFS[nodeById(port.node).type];
+        const wtype = isFnIn(td,port.port) ? "s" : portType(td,port.port);
+        drag={kind:"wire", fromOut:false, node:port.node, port:port.port, wtype, mx:p.x,my:p.y};
+      }
     }
   } else if (n){
     beginAction();
@@ -1049,7 +1386,7 @@ gc.addEventListener("pointermove", e=>{
   gptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
   const p = gpos(e);
   if (drag.kind==="wire"){ drag.mx=p.x; drag.my=p.y;
-    drag.hover = hitPort(p, drag.fromOut ? "in" : "out");
+    drag.hover = hitPort(p, drag.fromOut ? "in" : "out", drag.wtype);
     drawGraph(); }
   else if (drag.kind==="node"){
     const n=nodeById(drag.node);
@@ -1083,7 +1420,7 @@ gc.addEventListener("pointerup", e=>{
   }
   const p = gpos(e);
   if (drag.kind==="wire"){
-    const port = hitPort(p, drag.fromOut ? "in" : "out");
+    const port = hitPort(p, drag.fromOut ? "in" : "out", drag.wtype);
     if (port){
       if (drag.fromOut && !port.out) connect(drag.node, port.node, port.port);
       else if (!drag.fromOut && port.out) connect(port.node, drag.node, drag.port);
@@ -1122,9 +1459,22 @@ gc.addEventListener("wheel", e=>{ e.preventDefault();
 
 /* ---------------- pointer interaction: plot ---------------- */
 const ptrs = new Map();
-pc.addEventListener("pointerdown", e=>{ pc.setPointerCapture(e.pointerId);
-  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY}); });
+pc.addEventListener("pointerdown", e=>{
+  pc.setPointerCapture(e.pointerId);
+  const r = pc.getBoundingClientRect();
+  const sx = e.clientX-r.left, sy = e.clientY-r.top;
+  const h = planeHandleAt(sx, sy);
+  if (h){ hdrag = {h, pid:e.pointerId}; beginAction(); return; }
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+});
 pc.addEventListener("pointermove", e=>{
+  if (hdrag && e.pointerId===hdrag.pid){
+    const r = pc.getBoundingClientRect();
+    const wx = pxToX(e.clientX-r.left), wy = pxToY(e.clientY-r.top);
+    hdrag.h.set(wx, wy);
+    drawAll();
+    return;
+  }
   if (!ptrs.has(e.pointerId)) return;
   const prev = ptrs.get(e.pointerId);
   const cur = {x:e.clientX,y:e.clientY};
@@ -1148,7 +1498,12 @@ pc.addEventListener("pointermove", e=>{
   ptrs.set(e.pointerId,cur);
   drawPlot();
 });
-function ptrEnd(e){ ptrs.delete(e.pointerId); }
+function ptrEnd(e){
+  if (hdrag && e.pointerId===hdrag.pid){
+    hdrag=null; endAction(); updateInspector(); drawAll(); return;
+  }
+  ptrs.delete(e.pointerId);
+}
 pc.addEventListener("pointerup", ptrEnd); pc.addEventListener("pointercancel", ptrEnd);
 pc.addEventListener("wheel", e=>{ e.preventDefault();
   const s = e.deltaY>0 ? 1.12 : 1/1.12;
@@ -1310,17 +1665,19 @@ document.getElementById("themeBtn").addEventListener("click", ()=>{
 const domRow = document.getElementById("domRow");
 const t0In = document.getElementById("t0"), t1In = document.getElementById("t1");
 const subLine = document.getElementById("subLine");
+const MODE_LABEL = {"1d":"1d explicit","par":"parametric 2d","la":"linear algebra 2d"};
 function setMode(m, quiet){
-  MODE = (m==="par") ? "par" : "1d";
+  MODE = MODE_LABEL[m] ? m : "1d";
   for(const b of dMode.querySelectorAll("button"))
-    b.textContent = (b.dataset.mode==="1d" ? "1d explicit" : "parametric 2d")
+    b.textContent = MODE_LABEL[b.dataset.mode]
                   + (b.dataset.mode===MODE ? "  ✓" : "");
   domRow.style.display = MODE==="par" ? "flex" : "none";
   t0In.value = tDom.a; t1In.value = tDom.b;
-  subLine.textContent = MODE==="par"
-    ? "every wire carries a function of t · plot xy draws ( x(t), y(t) ) · tap a node to see it vs t"
-    : "every wire carries y(x) · flow nodes re-parameterize · tap a node for its curve & recipe";
-  if (MODE==="par") lockAspect();
+  subLine.textContent =
+    MODE==="par" ? "every wire carries a function of t · plot xy draws ( x(t), y(t) ) · tap a node to see it vs t"
+  : MODE==="la"  ? "wires are typed — ● scalar · ◆ vector · ■ matrix — drag arrowheads and î ĵ right in the plane"
+  :                "every wire carries y(x) · flow nodes re-parameterize · tap a node for its curve & recipe";
+  if (MODE!=="1d") lockAspect();
   rebuildExamples();
   if (!quiet) drawAll();
 }
@@ -1391,12 +1748,27 @@ function loadPreset(p){
   if (undoStack.length) endAction();
   setMode(p.mode || "1d", true);
   gpan={x:0,y:0}; gscale=1;
-  if (p.view){ view = {...p.view}; if (MODE==="par") lockAspect(); }
+  if (p.view){ view = {...p.view}; if (MODE!=="1d") lockAspect(); }
   else if (MODE==="par"){ view={x0:-2.4,x1:2.4,y0:-2,y1:2}; lockAspect(); }
+  else if (MODE==="la"){ view={x0:-3.2,x1:3.2,y0:-2.6,y1:2.6}; lockAspect(); }
   else view = {x0:-3.4, x1:3.4, y0:-2.2, y1:2.2};
   updateInspector(); drawAll();
 }
 function note(x,y,text){ const c=addNode("COMMENT",x,y); c.text=text; return c; }
+function cvec(x,y,vx,vy){        // const-fed vec (tip-draggable)
+  const cx=addNode("CONST",x,y,vx), cy=addNode("CONST",x,y+66,vy);
+  const v=addNode("VEC",x+108,y+22);
+  connect(cx.id,v.id,0); connect(cy.id,v.id,1);
+  return v;
+}
+function cmat(x,y,a,b,c_,d){     // const-fed matrix (î/ĵ-draggable)
+  const ci=addNode("CONST",x,y,a), cj=addNode("CONST",x,y+62,b);
+  const ck=addNode("CONST",x,y+124,c_), cl=addNode("CONST",x,y+186,d);
+  const m=addNode("MAT",x+108,y+56);
+  connect(ci.id,m.id,0); connect(cj.id,m.id,1);
+  connect(ck.id,m.id,2); connect(cl.id,m.id,3);
+  return m;
+}
 
 const CURRICULA = {
 "1d": [
@@ -1665,6 +2037,144 @@ const CURRICULA = {
   },
 }],
 ],
+"la": [
+["i · arrows", {
+  "a vector": ()=>{
+    note(280,10,"Drag the arrowhead — you are editing the two consts. Watch the recipe update.");
+    const v=cvec(16,60,1.6,0.9);
+    const dv=addNode("DRAWV",260,96);
+    connect(v.id,dv.id,0);
+  },
+  "tip-to-tail": ()=>{
+    note(430,6,"b is drawn AT a — tip-to-tail. a+b from the origin closes the triangle. Drag both tips.");
+    const a=cvec(10,40,1.5,0.5), b=cvec(10,220,-0.6,1.2);
+    const da=addNode("DRAWV",262,76);
+    const db=addNode("DRAWV",262,256);
+    const sum=addNode("VADD",262,166);
+    const ds=addNode("DRAWV",380,166);
+    connect(a.id,da.id,0);
+    connect(b.id,db.id,0); connect(a.id,db.id,1);
+    connect(a.id,sum.id,0); connect(b.id,sum.id,1);
+    connect(sum.id,ds.id,0);
+  },
+  "b − a": ()=>{
+    note(430,6,"b − a, anchored at a, points exactly to b's tip: the arrow that takes you from a to b.");
+    const a=cvec(10,40,1.4,0.3), b=cvec(10,220,-0.4,1.5);
+    const da=addNode("DRAWV",262,76), db=addNode("DRAWV",262,256);
+    const sub=addNode("VSUB",262,166);
+    const dd=addNode("DRAWV",380,166);
+    connect(a.id,da.id,0); connect(b.id,db.id,0);
+    connect(b.id,sub.id,0); connect(a.id,sub.id,1);
+    connect(sub.id,dd.id,0); connect(a.id,dd.id,1);
+  },
+}],
+["ii · products", {
+  "projection & shadow": ()=>{
+    note(400,6,"proj_b(a) is a's shadow on b. Select the dot node: sign > 0 same side, 0 means ⊥. Drag a past perpendicular.");
+    const a=cvec(10,40,1.2,1.5), b=cvec(10,220,2,0.3);
+    const da=addNode("DRAWV",262,76), db=addNode("DRAWV",262,256);
+    const pr=addNode("PROJ",262,166), dp=addNode("DRAWV",380,166);
+    const dt=addNode("DOT",380,60);
+    connect(a.id,da.id,0); connect(b.id,db.id,0);
+    connect(a.id,pr.id,0); connect(b.id,pr.id,1);
+    connect(pr.id,dp.id,0);
+    connect(a.id,dt.id,0); connect(b.id,dt.id,1);
+  },
+  "normalize & length": ()=>{
+    note(380,6,"norm(v) keeps direction, forces length 1. Select the length node for a live readout.");
+    const v=cvec(10,60,2.2,1.1);
+    const dv=addNode("DRAWV",262,96);
+    const nm=addNode("NORM",262,196), dn=addNode("DRAWV",380,196);
+    const ln=addNode("LEN",380,90);
+    connect(v.id,dv.id,0);
+    connect(v.id,nm.id,0); connect(nm.id,dn.id,0);
+    connect(v.id,ln.id,0);
+  },
+}],
+["iii · one matrix, one action", {
+  "rotation": ()=>{
+    note(340,-6,"R(θ) — scrub θ. The sample vector rides along: rotation moves every vector the same way.");
+    const th=addNode("CONST",16,40,0.6), R=addNode("ROT",130,60);
+    const dm=addNode("DRAWM",250,60);
+    const v=cvec(16,150,1.5,0.5);
+    const mv=addNode("MV",250,170), dv=addNode("DRAWV",370,170);
+    connect(th.id,R.id,0); connect(R.id,dm.id,0);
+    connect(R.id,mv.id,0); connect(v.id,mv.id,1);
+    connect(mv.id,dv.id,0);
+  },
+  "scale & flip": ()=>{
+    note(320,10,"S(sx, sy). Now set sx to −1: flip is just negative scale. det goes negative — orientation reversed.");
+    const sx=addNode("CONST",16,60,1.4), sy=addNode("CONST",16,130,0.7);
+    const S=addNode("SCL2",130,86), dm=addNode("DRAWM",250,86);
+    connect(sx.id,S.id,0); connect(sy.id,S.id,1); connect(S.id,dm.id,0);
+  },
+  "shear": ()=>{
+    note(320,10,"K(kx, 0) slides each row sideways by kx·y — grid lines stay parallel, area survives (det = 1).");
+    const kx=addNode("CONST",16,60,0.6), ky=addNode("CONST",16,130,0);
+    const K=addNode("SHEAR",130,86), dm=addNode("DRAWM",250,86);
+    connect(kx.id,K.id,0); connect(ky.id,K.id,1); connect(K.id,dm.id,0);
+  },
+  "read the columns": ()=>{
+    note(360,-6,"The matrix IS its columns: î lands at column 1, ĵ at column 2. Drag î and ĵ — the plane obeys.");
+    const M=cmat(10,30,1,0,0,1);
+    const dm=addNode("DRAWM",260,120);
+    connect(M.id,dm.id,0);
+  },
+}],
+["iv · composition", {
+  "order matters": ()=>{
+    note(430,-6,"Two planes: R·K (shear, then rotate) vs K·R (rotate, then shear). Right matrix acts first. Not equal.");
+    const th=addNode("CONST",10,30,0.5), R=addNode("ROT",120,50);
+    const kx=addNode("CONST",10,130,0.8), ky=addNode("CONST",10,200,0);
+    const K=addNode("SHEAR",120,156);
+    const rk=addNode("MM",244,70), kr=addNode("MM",244,180);
+    const d1=addNode("DRAWM",364,70), d2=addNode("DRAWM",364,180);
+    connect(th.id,R.id,0);
+    connect(kx.id,K.id,0); connect(ky.id,K.id,1);
+    connect(R.id,rk.id,0); connect(K.id,rk.id,1);
+    connect(K.id,kr.id,0); connect(R.id,kr.id,1);
+    connect(rk.id,d1.id,0); connect(kr.id,d2.id,0);
+  },
+  "undo (inverse)": ()=>{
+    note(420,-6,"M · M⁻¹ = identity: the drawn lattice sits exactly on the reference grid, det = 1.");
+    const M=cmat(10,30,1.2,0.4,-0.3,0.9);
+    const inv=addNode("INV",260,60);
+    const prod=addNode("MM",370,120);
+    const dm=addNode("DRAWM",484,120);
+    connect(M.id,inv.id,0);
+    connect(M.id,prod.id,0); connect(inv.id,prod.id,1);
+    connect(prod.id,dm.id,0);
+  },
+}],
+["v · animate", {
+  "becoming a rotation": ()=>{
+    note(430,-6,"mat mix slides every entry from I to R(1.2). k = (1 − cos τ)/2 loops it. Press ▷ play τ.");
+    const th=addNode("CONST",10,30,1.2), R=addNode("ROT",120,50);
+    const tm=addNode("TIME",10,150), cs=addNode("COS",120,150);
+    const ng=addNode("NEG",228,150), one=addNode("CONST",228,220,1);
+    const ad=addNode("ADD",334,168), hf=addNode("CONST",334,240,0.5);
+    const mk=addNode("MUL",440,186);
+    const mixm=addNode("MMIX",440,64);
+    const dm=addNode("DRAWM",560,64);
+    connect(th.id,R.id,0);
+    connect(tm.id,cs.id,0); connect(cs.id,ng.id,0);
+    connect(ng.id,ad.id,0); connect(one.id,ad.id,1);
+    connect(ad.id,mk.id,0); connect(hf.id,mk.id,1);
+    connect(R.id,mixm.id,1); connect(mk.id,mixm.id,2);
+    connect(mixm.id,dm.id,0);
+  },
+}],
+["vi · determinant", {
+  "area & collapse": ()=>{
+    note(360,-6,"det = signed area of the unit square's image. Drag ĵ onto î — the plane falls into a line (det → 0).");
+    const M=cmat(10,30,1.3,0.2,0.4,1);
+    const dm=addNode("DRAWM",260,120);
+    const dt=addNode("DET",260,230);
+    connect(M.id,dm.id,0);
+    connect(M.id,dt.id,0);
+  },
+}],
+],
 };
 function rebuildExamples(){
   dEx.innerHTML="";
@@ -1679,7 +2189,7 @@ function rebuildExamples(){
     }
   }
 }
-const PRESETS = {};   // flat index for tests / boot
+const PRESETS = {};
 for(const mode of Object.keys(CURRICULA))
   for(const [_,plates] of CURRICULA[mode])
     for(const [name,entry] of Object.entries(plates))
