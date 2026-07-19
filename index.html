@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>SD Math Plotter</title>
+<title>Math Atlas</title>
 <style>
-  :root{ --ground:#20242b; --ink:#ddd3c2; --rule:#5a5244; --red:#d0603e;
-    --blue:#7f97d2; --panel:#2b303a; --panel-edge:#454c59; --stage:#272b33; }
+  :root{ --ground:#000000; --ink:#e8e8e8; --rule:#9a9a9a; --red:#ff6b4a;
+    --blue:#8fb0ff; --panel:#0d0d0f; --panel-edge:#2a2a2e; --stage:#050507; }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   html,body{margin:0;background:var(--ground);color:var(--ink);
     font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
@@ -127,7 +127,7 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="ttl">SD Math Plotter</div>
+    <div class="ttl">Math Atlas</div>
     <nav class="menus">
       <div class="menu"><button id="mFile">file ▾</button>
         <div class="drop" id="dFile">
@@ -146,7 +146,7 @@
         <div class="drop" id="dEx"></div></div>
       <button id="themeBtn">◐ theme</button>
     </nav>
-    <div class="pl">v0.14</div>
+    <div class="pl">v0.15</div>
   </header>
   <div class="sub" id="subLine">every wire carries y(x) · flow nodes re-parameterize · tap a node for its curve &amp; recipe</div>
 
@@ -228,6 +228,36 @@ const THEMES = {
     frameEdge:"#b9a47a", frameFill:"rgba(35,57,107,.05)", frameTitle:"#23396b",
     comment:"#6b5d40",
     plotCols:["#aa3a2c","#23396b","#3f6d4e","#a87a1f"],
+  },
+  black: {
+    css:{ground:"#000000",ink:"#e8e8e8",rule:"#9a9a9a",red:"#ff6b4a",
+         blue:"#8fb0ff",panel:"#0d0d0f","panel-edge":"#2a2a2e",stage:"#050507"},
+    gridDot:"rgba(232,232,232,.08)",
+    nodeFill:"#111114", nodeStroke:"#8a8a92", nodeSel:"#ff6b4a",
+    title:"#e8e8e8", flowTitle:"#9db6ff", divider:"#2a2a2e",
+    portEmpty:"#55555c", portVal:"#e8e8e8", portFn:"#8fb0ff", portOut:"#ff6b4a",
+    wireVal:"#c9c9c9", wireFn:"#8fb0ff", wireDrag:"#ff6b4a",
+    vec:"#6fd3a8", mat:"#c79bf0", data:"#e0a53c",
+    plotBg:"#000000", gridLine:"rgba(160,160,160,.18)", axis:"#d6d6d6",
+    tick:"#9a9a9a", ghost:"#e8e8e8", label:"#9a9a9a",
+    frameEdge:"#3a3a44", frameFill:"rgba(143,176,255,.06)", frameTitle:"#9db6ff",
+    comment:"#a8a8b2",
+    plotCols:["#ff6b4a","#8fb0ff","#5fd39a","#f0c04a"],
+  },
+  white: {
+    css:{ground:"#ffffff",ink:"#1c1e24",rule:"#6d7078",red:"#c8401f",
+         blue:"#2f4f9e",panel:"#f4f4f6","panel-edge":"#d4d5da",stage:"#fafafb"},
+    gridDot:"rgba(28,30,36,.10)",
+    nodeFill:"#ffffff", nodeStroke:"#3c3f48", nodeSel:"#c8401f",
+    title:"#1c1e24", flowTitle:"#2f4f9e", divider:"#d4d5da",
+    portEmpty:"#b9bbc2", portVal:"#1c1e24", portFn:"#2f4f9e", portOut:"#c8401f",
+    wireVal:"#3c3f48", wireFn:"#2f4f9e", wireDrag:"#c8401f",
+    vec:"#25795a", mat:"#6b3fa0", data:"#946a10",
+    plotBg:"#ffffff", gridLine:"rgba(60,63,72,.14)", axis:"#1c1e24",
+    tick:"#6d7078", ghost:"#1c1e24", label:"#6d7078",
+    frameEdge:"#c0c2ca", frameFill:"rgba(47,79,158,.05)", frameTitle:"#2f4f9e",
+    comment:"#5a5d66",
+    plotCols:["#c8401f","#2f4f9e","#25795a","#a3720e"],
   },
 };
 let TH = THEMES.ink;
@@ -2450,9 +2480,10 @@ function firstPreset(mode){
   const plates = CURRICULA[mode][0][1];
   return PRESETS[Object.keys(plates)[0]];
 }
-let themeName = "ink";
+let themeName = "black";
+const THEME_ORDER = ["black","ink","plate","white"];
 document.getElementById("themeBtn").addEventListener("click", ()=>{
-  themeName = themeName==="ink" ? "plate" : "ink";
+  themeName = THEME_ORDER[(THEME_ORDER.indexOf(themeName)+1) % THEME_ORDER.length];
   setTheme(themeName);
 });
 
@@ -3314,7 +3345,7 @@ for(const mode of Object.keys(CURRICULA))
 
 /* ---------------- boot ---------------- */
 function drawAll(){ syncPvals(); maybeGlow(); drawGraph(); drawPlot(); if (MODE==="train"){ drawStrip(); if (SHOW_LAND) drawMap(); } updateExpr(); }
-setTheme("ink");
+setTheme("black");
 setMode("1d", true);
 loadPreset(PRESETS["wave"]);
 resize();
