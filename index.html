@@ -39,6 +39,7 @@
     background:var(--stage);overflow:hidden;}
   #graphStage{aspect-ratio:10/7;}
   #plotStage{aspect-ratio:10/6;margin-top:12px;}
+  #stripStage{margin-top:10px;height:96px;}
   canvas{display:block;width:100%;height:100%;touch-action:none;}
   .bar{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0;}
   button{font-family:inherit;font-size:12px;letter-spacing:.06em;
@@ -69,6 +70,9 @@
     font-family:"SF Mono",Menlo,Consolas,monospace;color:var(--ink);
     background:var(--stage);border:1.5px solid var(--panel-edge);border-radius:3px;
     padding:4px 6px;-webkit-user-select:text;user-select:text;}
+  .dom input[type=range]{width:150px;padding:0;border:none;background:none;
+    accent-color:var(--red);}
+  .dom span{min-width:86px;}
   #expr{font-size:12px;margin:8px 2px 0;color:var(--blue);min-height:16px;
     font-family:"SF Mono",Menlo,Consolas,monospace;word-break:break-all;}
   #expr .who{color:var(--rule);font-family:inherit;font-variant:small-caps;
@@ -133,12 +137,13 @@
           <button data-mode="1d">1d explicit</button>
           <button data-mode="par">parametric 2d</button>
           <button data-mode="la">linear algebra 2d</button>
+          <button data-mode="train">train</button>
         </div></div>
       <div class="menu"><button id="mEx">examples ▾</button>
         <div class="drop" id="dEx"></div></div>
       <button id="themeBtn">◐ theme</button>
     </nav>
-    <div class="pl">v0.9</div>
+    <div class="pl">v0.11</div>
   </header>
   <div class="sub" id="subLine">every wire carries y(x) · flow nodes re-parameterize · tap a node for its curve &amp; recipe</div>
 
@@ -159,17 +164,24 @@
         <button id="pasteBtn">⎗ paste</button>
         <button id="delBtn">delete</button>
         <button id="playBtn">▷ play τ</button>
+        <button id="stepBtn" style="display:none">⟳ step</button>
+        <button id="resetBtn" style="display:none">↺ reset</button>
+        <button id="landBtn" style="display:none">⛰ landscape</button>
         <button id="saveBtn">save png</button>
       </div>
       <div id="inspector"></div>
     </div>
     <div>
       <div class="stage" id="plotStage"><canvas id="pc"></canvas></div>
+      <div class="stage" id="stripStage" style="display:none"><canvas id="lc"></canvas></div>
       <div class="dom" id="domRow">t ∈ [
         <input id="t0" inputmode="decimal" step="any" type="number">
         ,
         <input id="t1" inputmode="decimal" step="any" type="number">
         ]</div>
+      <div class="dom" id="spdRow">speed
+        <input type="range" id="spd" min="0" max="1" step="0.005" value="0.747">
+        <span id="spdVal"></span></div>
       <div id="expr"></div>
     </div>
   </div>
@@ -190,7 +202,7 @@ const THEMES = {
     title:"#ddd3c2", flowTitle:"#92a8e0", divider:"#454c59",
     portEmpty:"#6b7383", portVal:"#ddd3c2", portFn:"#7f97d2", portOut:"#d0603e",
     wireVal:"#c8bfae", wireFn:"#7f97d2", wireDrag:"#d0603e",
-    vec:"#7bbfa0", mat:"#b48ed8",
+    vec:"#7bbfa0", mat:"#b48ed8", data:"#c98f2f",
     plotBg:"#23272e", gridLine:"rgba(160,150,130,.20)", axis:"#c8bfae",
     tick:"#8d94a3", ghost:"#ddd3c2", label:"#8d94a3",
     frameEdge:"#566079", frameFill:"rgba(127,151,210,.07)", frameTitle:"#9fb0d8",
@@ -205,7 +217,7 @@ const THEMES = {
     title:"#22303f", flowTitle:"#23396b", divider:"#cdb78a",
     portEmpty:"#b9a47a", portVal:"#22303f", portFn:"#23396b", portOut:"#aa3a2c",
     wireVal:"#22303f", wireFn:"#23396b", wireDrag:"#aa3a2c",
-    vec:"#3f6d4e", mat:"#5c3d78",
+    vec:"#3f6d4e", mat:"#5c3d78", data:"#8a6a1a",
     plotBg:"#f3e9d2", gridLine:"rgba(185,164,122,.55)", axis:"#22303f",
     tick:"#6b5d40", ghost:"#22303f", label:"#6b5d40",
     frameEdge:"#b9a47a", frameFill:"rgba(35,57,107,.05)", frameTitle:"#23396b",
@@ -227,10 +239,10 @@ function setTheme(name){
    la : typed wires (scalar/vec/mat); draw vec & draw mat render the plane */
 let MODE = "1d";
 let tDom = {a:0, b:6.2832};
-function VN(){ return MODE==="1d" ? "x" : "t"; }
+function VN(){ return MODE==="par" ? "t" : "x"; }
 function CN(){ return MODE==="1d" ? "t" : "τ"; }
 function modeOK(def){ return !def.modes || def.modes.includes(MODE); }
-const PLOT_OF_MODE = {PLOT:"1d", PLOT2:"par", DRAWV:"la", DRAWM:"la"};
+const PLOT_OF_MODE = {PLOT:"1d", PLOT2:"par", DRAWV:"la", DRAWM:"la", FIT:"train"};
 
 /* ---------------- node definitions ---------------- */
 const PRE = "const {sin,cos,tan,exp,log,sqrt,floor,abs,sign,min,max,pow,atan}=Math;" +
@@ -256,19 +268,30 @@ const PRE = "const {sin,cos,tan,exp,log,sqrt,floor,abs,sign,min,max,pow,atan}=Ma
   "const mm=(A,B)=>[A[0]*B[0]+A[1]*B[2], A[0]*B[1]+A[1]*B[3], A[2]*B[0]+A[3]*B[2], A[2]*B[1]+A[3]*B[3]];" +
   "const det2=m=>m[0]*m[3]-m[1]*m[2];" +
   "const inv2=m=>{const d=det2(m);if(Math.abs(d)<1e-12)return[NaN,NaN,NaN,NaN];return[m[3]/d,-m[1]/d,-m[2]/d,m[0]/d];};" +
-  "const mmix=(A,B,k)=>[A[0]+(B[0]-A[0])*k,A[1]+(B[1]-A[1])*k,A[2]+(B[2]-A[2])*k,A[3]+(B[3]-A[3])*k];";
+  "const mmix=(A,B,k)=>[A[0]+(B[0]-A[0])*k,A[1]+(B[1]-A[1])*k,A[2]+(B[2]-A[2])*k,A[3]+(B[3]-A[3])*k];" +
+  "const __mb=s=>{let a=(s*1000+17)>>>0;return()=>{a|=0;a=a+0x6D2B79F5|0;let q=Math.imul(a^a>>>15,1|a);q=q+Math.imul(q^q>>>7,61|q)^q;return((q^q>>>14)>>>0)/4294967296;};};" +
+  "const __gauss=r=>{const u=Math.max(r(),1e-9),v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(6.283185307179586*v);};" +
+  "const __nc=n=>Math.min(400,Math.max(2,Math.round(n)));" +
+  "const genLine=(n,a,b,sg,seed)=>{const r=__mb(seed),o=[];for(let q=0;q<__nc(n);q++){const X=-2.5+5*r();o.push([X,a*X+b+sg*__gauss(r)]);}return o;};" +
+  "const genWave=(n,k,A,sg,seed)=>{const r=__mb(seed+31),o=[];for(let q=0;q<__nc(n);q++){const X=-2.5+5*r();o.push([X,A*Math.sin(k*X)+sg*__gauss(r)]);}return o;};" +
+  "const genStep=(n,sg,seed)=>{const r=__mb(seed+59),o=[];for(let q=0;q<__nc(n);q++){const X=-2.5+5*r();o.push([X,(Math.sin(1.6*X)>=0?0.8:-0.8)+sg*__gauss(r)]);}return o;};" +
+  "const shuffleD=(d,seed)=>{const r=__mb(seed*7+3),o=d.slice();for(let q=o.length-1;q>0;q--){const j=Math.floor(r()*(q+1));const tp=o[q];o[q]=o[j];o[j]=tp;}return o;};" +
+  "const splitD=(d,ratio,which)=>{const c=Math.round(d.length*Math.min(1,Math.max(0,ratio)));return which?d.slice(c):d.slice(0,c);};" +
+  "const batchD=(d,k,s)=>{if(!d.length)return d;const K=Math.min(d.length,Math.max(1,Math.round(k)));const o=[];const st=(Math.max(0,Math.round(s))*K)%d.length;for(let q=0;q<K;q++)o.push(d[(st+q)%d.length]);return o;};" +
+  "const STEP=()=>(globalThis.__trainStep||0);";
 
 const CAT = { src:"◈ source", ari:"＋ arithmetic", wav:"∿ wave",
-              shp:"⌗ shape", vec:"⇀ vector", mat:"▦ matrix",
+              shp:"⌗ shape", dat:"⛁ data", vec:"⇀ vector", mat:"▦ matrix",
               flw:"⟳ flow", log:"≷ logic",
               ann:"✎ annotate", out:"▤ output" };
 const M12 = ["1d","par"];   // classic scalar-signal modes
 
 const DEFS = {
-  X:      {cat:"src", label:"x",       ins:[], modes:M12},
-  TIME:   {cat:"src", label:"time",    ins:[]},
+  X:      {cat:"src", label:"x",       ins:[], modes:["1d","par","train"]},
+  TIME:   {cat:"src", label:"time",    ins:[], modes:["1d","par","la"]},
   INDEX:  {cat:"src", label:"index i", ins:[], modes:M12},
   CONST:  {cat:"src", label:"const",   ins:[], hasVal:true},
+  PARAM:  {cat:"src", label:"param",   ins:[], hasVal:true, learn:true, modes:["train"]},
   ADD:    {cat:"ari", label:"add",   ins:["a","b"], d:[0,0], ex:(a,b)=>`(${a} + ${b})`},
   SUB:    {cat:"ari", label:"sub",   ins:["a","b"], d:[0,0], ex:(a,b)=>`(${a} - ${b})`},
   MUL:    {cat:"ari", label:"mul",   ins:["a","b"], d:[1,1], ex:(a,b)=>`(${a} * ${b})`},
@@ -291,6 +314,14 @@ const DEFS = {
   CLAMP:  {cat:"shp", label:"clamp", ins:["a","lo","hi"], d:[0,0,1], ex:(a,l,h)=>`clamp(${a}, ${l}, ${h})`},
   MIX:    {cat:"shp", label:"mix",   ins:["a","b","k"],   d:[0,1,.5],ex:(a,b,k)=>`mix(${a}, ${b}, ${k})`},
   SMOOTH: {cat:"shp", label:"smoothstep", ins:["e0","e1","a"], d:[0,1,0], ex:(e0,e1,a)=>`smoothstep(${e0}, ${e1}, ${a})`},
+
+  DGLINE: {cat:"dat", label:"data: line",  ins:["n","a","b","σ","seed"], d:[40,0.7,0.3,0.25,7], out:"d", modes:["train"]},
+  DGWAVE: {cat:"dat", label:"data: wave",  ins:["n","k","A","σ","seed"], d:[60,2,0.8,0.2,7],   out:"d", modes:["train"]},
+  DGSTEP: {cat:"dat", label:"data: steps", ins:["n","σ","seed"],         d:[60,0.15,7],        out:"d", modes:["train"]},
+  SHUF:   {cat:"dat", label:"shuffle",     ins:["data","seed"],  tin:["d","s"], d:[0,3],    out:"d", modes:["train"]},
+  DTRAIN: {cat:"dat", label:"train part",  ins:["data","ratio"], tin:["d","s"], d:[0,0.75], out:"d", modes:["train"]},
+  DTEST:  {cat:"dat", label:"test part",   ins:["data","ratio"], tin:["d","s"], d:[0,0.75], out:"d", modes:["train"]},
+  DBATCH: {cat:"dat", label:"batch k",     ins:["data","k"],     tin:["d","s"], d:[0,8],    out:"d", modes:["train"]},
 
   VEC:    {cat:"vec", label:"vec (x,y)",  ins:["x","y"], d:[1,0], out:"v", modes:["la"]},
   POLAR:  {cat:"vec", label:"polar (r,θ)",ins:["r","θ"], d:[1,0], out:"v", modes:["la"]},
@@ -319,7 +350,7 @@ const DEFS = {
   SHIFT:  {cat:"flw", label:"shift",  ins:["f","dx"],  fin:[0], d:[0,0.5], modes:M12},
   DIFF:   {cat:"flw", label:"d/dx",   ins:["f","h"],   fin:[0], d:[0,0.01],modes:M12},
   BLUR:   {cat:"flw", label:"blur",   ins:["f","w"],   fin:[0], d:[0,0.5], modes:M12},
-  SUM:    {cat:"flw", label:"Σ loop", ins:["body","n"],fin:[0], d:[0,6],   modes:M12},
+  SUM:    {cat:"flw", label:"Σ loop", ins:["body","n"],fin:[0], d:[0,6],   modes:["1d","par","train"]},
   PROD:   {cat:"flw", label:"Π loop", ins:["body","n"],fin:[0], d:[1,4],   modes:M12},
 
   GT:     {cat:"log", label:"greater", ins:["a","b"], d:[0,0], modes:M12},
@@ -340,6 +371,8 @@ const DEFS = {
   PLOT2:  {cat:"out", label:"plot xy",  ins:["x","y"],   noOut:true, d:[0,0], modes:["par"]},
   DRAWV:  {cat:"out", label:"draw vec", ins:["v","at"],  noOut:true, tin:["v","v"], modes:["la"]},
   DRAWM:  {cat:"out", label:"draw mat", ins:["M"],       noOut:true, tin:["m"],     modes:["la"]},
+  FIT:    {cat:"out", label:"fit",      ins:["f","data","test"], noOut:true,
+           fin:[0], tin:["s","d","d"], d:[0,0,0], modes:["train"]},
 };
 function fmtNum(v){ const s = Number(v.toPrecision(6)).toString(); return v<0?`(${s})`:s; }
 function fmtFull(v){ const s = String(v); return v<0?`(${s})`:s; }   // compiler: no display rounding
@@ -497,12 +530,13 @@ function placeNode(type, wx, wy){
 
 /* ---------------- save / load graph ---------------- */
 function serializeGraph(){
-  return JSON.stringify({app:"function-loom", v:9, mode:MODE, tDom:{...tDom},
+  return JSON.stringify({app:"function-loom", v:11, mode:MODE, tDom:{...tDom},
     nodes:nodes.map(n=>{
       const o={id:n.id,type:n.type,x:Math.round(n.x),y:Math.round(n.y),val:n.val};
       if (n.text!==undefined) o.text=n.text;
       if (n.w!==undefined) o.w=n.w;
       if (n.h!==undefined) o.h=n.h;
+      if (n.alpha!==undefined) o.alpha=n.alpha;
       return o;
     }),
     wires, nextId}, null, 1);
@@ -519,6 +553,7 @@ function loadGraphObject(o){
     if (n.text!==undefined) m.text=n.text;
     if (n.w!==undefined) m.w=n.w;
     if (n.h!==undefined) m.h=n.h;
+    if (n.alpha!==undefined) m.alpha=n.alpha;
     if (n.type==="FRAME"){ m.text=m.text||"frame"; m.w=m.w||230; m.h=m.h||150; }
     if (n.type==="COMMENT") m.text=m.text||"note…";
     return m;
@@ -528,7 +563,8 @@ function loadGraphObject(o){
   selId=-1; selWire=null;
   endAction();
   if (o.tDom && isFinite(o.tDom.a) && isFinite(o.tDom.b)) tDom={a:o.tDom.a,b:o.tDom.b};
-  setMode(["par","la"].includes(o.mode) ? o.mode : "1d", true);
+  trainStepCount = 0; globalThis.__trainStep = 0; clearHist();
+  setMode(["par","la","train"].includes(o.mode) ? o.mode : "1d", true);
   gpan={x:0,y:0}; gscale=1;
   updateInspector(); drawAll();
   return true;
@@ -563,6 +599,7 @@ function typedDefault(def,i){
   const ty = portType(def,i);
   if (ty==="v") return "[0,0]";
   if (ty==="m") return "[1,0,0,1]";
+  if (ty==="d") return "[]";
   return fmtFull(def.d ? def.d[i] : 0);
 }
 function callArg(nid, i){
@@ -579,6 +616,15 @@ function localExpr(nid){
     case "TIME":  return "t";
     case "INDEX": return "i";
     case "CONST": return fmtFull(n.val);
+    case "PARAM": return `((globalThis.__pvals&&globalThis.__pvals[${n.id}]!==undefined)?globalThis.__pvals[${n.id}]:${fmtFull(n.val)})`;
+    case "DGLINE":return `genLine(${A[0]}, ${A[1]}, ${A[2]}, ${A[3]}, ${A[4]})`;
+    case "DGWAVE":return `genWave(${A[0]}, ${A[1]}, ${A[2]}, ${A[3]}, ${A[4]})`;
+    case "DGSTEP":return `genStep(${A[0]}, ${A[1]}, ${A[2]})`;
+    case "SHUF":  return `shuffleD(${A[0]}, ${A[1]})`;
+    case "DTRAIN":return `splitD(${A[0]}, ${A[1]}, 0)`;
+    case "DTEST": return `splitD(${A[0]}, ${A[1]}, 1)`;
+    case "DBATCH":return `batchD(${A[0]}, ${A[1]}, STEP())`;
+    case "FIT":   return A[0];
     case "SAMPLE":return `(${A[0]})((${A[1]}), t, i)`;
     case "SHIFT": return `(${A[0]})(x - (${A[1]}), t, i)`;
     case "DIFF":  return `((h)=>((${A[0]})(x+h,t,i) - (${A[0]})(x-h,t,i)) / (2*h))(${A[1]})`;
@@ -647,6 +693,7 @@ function compileInput(nid, i){
   const ty = portType(def,i);
   if (ty==="v") return ()=>[0,0];
   if (ty==="m") return ()=>[1,0,0,1];
+  if (ty==="d") return ()=>[];
   const v = def.d ? def.d[i] : 0;
   return ()=>v;
 }
@@ -659,6 +706,7 @@ function pArg(nid, i, xn){
   const ty = portType(def,i);
   if (ty==="v") return "(0, 0)";
   if (ty==="m") return "I";
+  if (ty==="d") return "∅";
   return fmtNum(def.d ? def.d[i] : 0);
 }
 function pexpr(id, xn, depth){
@@ -671,6 +719,15 @@ function pexpr(id, xn, depth){
     case "TIME":  return CN();
     case "INDEX": return "i";
     case "CONST": return fmtNum(n.val);
+    case "PARAM": return fmtNum(n.val);
+    case "DGLINE":return `line-data(n=${pArg(id,0,xn)})`;
+    case "DGWAVE":return `wave-data(n=${pArg(id,0,xn)})`;
+    case "DGSTEP":return `step-data(n=${pArg(id,0,xn)})`;
+    case "SHUF":  return `shuffle(${pArg(id,0,xn)})`;
+    case "DTRAIN":return `train⟨${pArg(id,1,xn)}⟩(${pArg(id,0,xn)})`;
+    case "DTEST": return `test⟨${pArg(id,1,xn)}⟩(${pArg(id,0,xn)})`;
+    case "DBATCH":return `batch⟨${pArg(id,1,xn)}⟩(${pArg(id,0,xn)})`;
+    case "FIT":   return wf ? pexpr(wf.from, xn, depth) : "0";
     case "SAMPLE":return wf ? pexpr(wf.from, `(${pArg(id,1,xn)})`, depth) : "0";
     case "SHIFT": return wf ? pexpr(wf.from, `(${xn} - ${pArg(id,1,xn)})`, depth) : "0";
     case "DIFF":  return `d/d${VN()}[ ${wf?pexpr(wf.from,xn,depth):"0"} ]`;
@@ -726,6 +783,17 @@ function prettyOf(id){
 /* ---------------- canvases ---------------- */
 const gc = document.getElementById("gc"), gctx = gc.getContext("2d");
 const pc = document.getElementById("pc"), pctx = pc.getContext("2d");
+const lc = document.getElementById("lc"), lctx = lc.getContext("2d");
+let LW=0, LH=0;
+function lcSize(){
+  if (MODE!=="train"){ LW=0; return; }
+  const r = lc.getBoundingClientRect();
+  if (!r.width){ LW=0; return; }
+  if (lc.width !== Math.round(r.width*DPR)){
+    lc.width = r.width*DPR; lc.height = r.height*DPR;
+  }
+  LW = r.width; LH = r.height;
+}
 let DPR = Math.min(window.devicePixelRatio||1, 2);
 function sizeCanvas(cv){
   const r = cv.getBoundingClientRect();
@@ -736,7 +804,7 @@ let GW=0,GH=0,PW=0,PH=0;
 function resize(){
   ({w:GW,h:GH} = sizeCanvas(gc));
   ({w:PW,h:PH} = sizeCanvas(pc));
-  if (MODE!=="1d") lockAspect();
+  if (MODE==="par"||MODE==="la") lockAspect();
   drawAll();
 }
 window.addEventListener("resize", resize);
@@ -787,10 +855,10 @@ function inactivePlot(n){
   return m !== undefined && m !== MODE;
 }
 function typeColor(ty){
-  return ty==="v" ? TH.vec : ty==="m" ? TH.mat : TH.portVal;
+  return ty==="v" ? TH.vec : ty==="m" ? TH.mat : ty==="d" ? TH.data : TH.portVal;
 }
 function typeWire(ty){
-  return ty==="v" ? TH.vec : ty==="m" ? TH.mat : TH.wireVal;
+  return ty==="v" ? TH.vec : ty==="m" ? TH.mat : ty==="d" ? TH.data : TH.wireVal;
 }
 
 function drawGraph(){
@@ -867,10 +935,13 @@ function drawGraph(){
     c.strokeStyle = sel ? TH.nodeSel : TH.nodeStroke;
     c.lineWidth = sel ? 2.4 : 1.6;
     rr(c, n.x, n.y, NW, h, 4); c.fill(); c.stroke();
+    if (def.learn){ c.strokeStyle=TH.nodeSel; c.lineWidth=1;
+      rr(c, n.x+3, n.y+3, NW-6, h-6, 3); c.stroke(); }
     const oty = outTypeOf(def);
     c.fillStyle = PLOT_OF_MODE[n.type]!==undefined ? plotColor(n.id)
+                : def.learn ? TH.css.red
                 : (def.cat==="flw" ? TH.flowTitle
-                : oty==="v" ? TH.vec : oty==="m" ? TH.mat : TH.title);
+                : oty==="v" ? TH.vec : oty==="m" ? TH.mat : oty==="d" ? TH.data : TH.title);
     c.font = "12px Iowan Old Style, Palatino, Georgia, serif";
     c.textAlign="center"; c.textBaseline="middle";
     c.fillText(nodeTitle(n), n.x+NW/2, n.y+13);
@@ -883,14 +954,14 @@ function drawGraph(){
       const pty = portType(def,i);
       const wired = wireInto(n.id,i);
       const col = !wired ? TH.portEmpty : fnPort ? TH.portFn : typeColor(pty);
-      const shape = fnPort ? "sq" : pty==="v" ? "dm" : pty==="m" ? "sq" : "";
+      const shape = fnPort ? "sq" : pty==="v" ? "dm" : pty==="m" ? "sq" : pty==="d" ? "hx" : "";
       dot(c, p.x, p.y, col, shape);
       c.fillStyle=TH.label; c.textAlign="left";
       c.fillText(name, p.x+8, p.y);
     });
     if (!def.noOut){
       const p = outPortPos(n);
-      const shape = oty==="v" ? "dm" : oty==="m" ? "sq" : "";
+      const shape = oty==="v" ? "dm" : oty==="m" ? "sq" : oty==="d" ? "hx" : "";
       dot(c, p.x, p.y, TH.portOut, shape);
     }
     c.globalAlpha = 1;
@@ -907,6 +978,12 @@ function dot(c,x,y,col,shape){
     c.strokeStyle=TH.css.stage; c.lineWidth=1; c.strokeRect(x-4,y-4,8,8); return; }
   if (shape==="dm"){ c.beginPath();
     c.moveTo(x,y-5.4); c.lineTo(x+5.4,y); c.lineTo(x,y+5.4); c.lineTo(x-5.4,y);
+    c.closePath(); c.fillStyle=col; c.fill();
+    c.strokeStyle=TH.css.stage; c.lineWidth=1; c.stroke(); return; }
+  if (shape==="hx"){ c.beginPath();
+    for(let k=0;k<6;k++){ const a=Math.PI/6+k*Math.PI/3;
+      const px=x+5*Math.cos(a), py=y+5*Math.sin(a);
+      k?c.lineTo(px,py):c.moveTo(px,py); }
     c.closePath(); c.fillStyle=col; c.fill();
     c.strokeStyle=TH.css.stage; c.lineWidth=1; c.stroke(); return; }
   c.beginPath(); c.arc(x,y,4.4,0,7); c.fillStyle=col; c.fill();
@@ -957,6 +1034,9 @@ function drawPlot(){
   const ghostOK = sel && !DEFS[sel.type].noOut && !DEFS[sel.type].isAnn;
   if (MODE==="la"){
     drawPlaneLA(c, sel, ghostOK);
+  } else if (MODE==="train"){
+    if (SHOW_LAND) drawLandscape(c);
+    else drawTrain(c, sel, ghostOK);
   } else if (MODE==="par"){
     if (ghostOK) traceDom(c, compile(selId), TH.ghost, 1.4, [5,4]);
     for(const p of nodes.filter(n=>n.type==="PLOT2"))
@@ -1117,7 +1197,244 @@ function drawPlaneLA(c, sel, ghostOK){
   }
 }
 
-/* ---------------- tip dragging (la) ---------------- */
+/* ---------------- train mode plot ---------------- */
+function drawTrain(c, sel, ghostOK){
+  syncPvals();
+  globalThis.__trainStep = trainStepCount;
+  if (ghostOK){
+    const oty = outTypeOf(DEFS[sel.type]);
+    try{
+      if (oty==="s") trace(c, compile(selId), TH.ghost, 1.4, [5,4]);
+      else if (oty==="d"){
+        const pts = compile(selId)(0,t,0);
+        if (Array.isArray(pts)){
+          c.strokeStyle=TH.ghost; c.lineWidth=1.2;
+          for(const [qx,qy] of pts){
+            const px=xToPx(qx), py=yToPx(qy);
+            c.beginPath();
+            c.moveTo(px-3,py-3); c.lineTo(px+3,py+3);
+            c.moveTo(px-3,py+3); c.lineTo(px+3,py-3);
+            c.stroke();
+          }
+        }
+      }
+    }catch(e){}
+  }
+  for(const f of nodes.filter(n=>n.type==="FIT")){
+    const col = plotColor(f.id);
+    let fm, dat, tst;
+    try{ fm = compileInput(f.id,0);
+         dat = compileInput(f.id,1)(0,t,0);
+         tst = compileInput(f.id,2)(0,t,0); }
+    catch(e){ continue; }
+    if (!Array.isArray(dat)) dat=[];
+    if (!Array.isArray(tst)) tst=[];
+    // residual whiskers
+    c.strokeStyle=col; c.lineWidth=1; c.globalAlpha=0.45;
+    for(const [qx,qy] of dat){
+      let yy; try{ yy=fm(qx,t,0); }catch(e){ continue; }
+      if (!isFinite(yy)) continue;
+      c.beginPath(); c.moveTo(xToPx(qx),yToPx(qy));
+      c.lineTo(xToPx(qx),yToPx(yy)); c.stroke();
+    }
+    c.globalAlpha=1;
+    // train points: filled
+    c.fillStyle=TH.axis;
+    for(const [qx,qy] of dat){
+      c.beginPath(); c.arc(xToPx(qx),yToPx(qy),3,0,7); c.fill();
+    }
+    // test points: hollow
+    c.strokeStyle=TH.tick; c.lineWidth=1.4;
+    for(const [qx,qy] of tst){
+      c.beginPath(); c.arc(xToPx(qx),yToPx(qy),3.2,0,7); c.stroke();
+    }
+    // model curve
+    if (wireInto(f.id,0)) trace(c, fm, col, 2.2);
+  }
+}
+
+
+/* ---------------- loss landscape (train) ---------------- */
+function landscapeCtx(){
+  const f = leadFit(); if (!f) return null;
+  const ps = fitParams(f.id);
+  if (ps.length<1 || ps.length>2) return {f, ps};
+  syncPvals(); globalThis.__trainStep = trainStepCount;
+  const fm = compileInput(f.id,0);
+  let dat; try{ dat = compileInput(f.id,1)(0,t,0); }catch(e){ dat=[]; }
+  if (!Array.isArray(dat) || !dat.length) return {f, ps};
+  const J = (vals)=>{
+    const pv = globalThis.__pvals;
+    const old = ps.map(p=>pv[p.id]);
+    ps.forEach((p,i)=>pv[p.id]=vals[i]);
+    let s=0;
+    for(const [qx,qy] of dat){
+      let e; try{ e = fm(qx,t,0)-qy; }catch(err){ s=NaN; break; }
+      s += e*e;
+    }
+    ps.forEach((p,i)=>pv[p.id]=old[i]);
+    return s/dat.length;
+  };
+  return {f, ps, J};
+}
+function drawLandscape(c){
+  const L = landscapeCtx();
+  const msg = s=>{ c.fillStyle=TH.tick;
+    c.font="13px Iowan Old Style, Palatino, Georgia, serif";
+    c.textAlign="center"; c.fillText(s, PW/2, PH/2); };
+  if (!L){ msg("add a fit node to see its loss landscape"); return; }
+  if (!L.J){ msg(`landscape needs 1 or 2 params — this model has ${L.ps.length}`); return; }
+  const {f, ps, J} = L;
+  const col = plotColor(f.id);
+  if (ps.length===1){
+    c.strokeStyle=col; c.lineWidth=2.2;
+    c.beginPath(); let pen=false;
+    const N=300;
+    for(let i=0;i<=N;i++){
+      const w = view.x0 + (view.x1-view.x0)*i/N;
+      const Jv = J([w]);
+      if (!isFinite(Jv)){ pen=false; continue; }
+      const px=xToPx(w), py=yToPx(Jv);
+      pen ? c.lineTo(px,py) : (c.moveTo(px,py), pen=true);
+    }
+    c.stroke();
+    const P=pathHist, stride=Math.max(1,Math.floor(P.length/120));
+    c.fillStyle=TH.axis;
+    for(let i=0;i<P.length;i+=stride){
+      const w=P[i][0], Jv=J([w]);
+      if (!isFinite(Jv)) continue;
+      c.globalAlpha=0.2+0.55*i/Math.max(1,P.length-1);
+      c.beginPath(); c.arc(xToPx(w),yToPx(Jv),2.2,0,7); c.fill();
+    }
+    c.globalAlpha=1;
+    const w=ps[0].val, Jv=J([w]);
+    if (isFinite(Jv)){
+      c.beginPath(); c.arc(xToPx(w),yToPx(Jv),6,0,7);
+      c.fillStyle=col; c.fill();
+      c.strokeStyle=TH.plotBg; c.lineWidth=1.6; c.stroke();
+    }
+    c.fillStyle=TH.tick;
+    c.font="11px Iowan Old Style, Palatino, Georgia, serif";
+    c.textAlign="right";
+    c.fillText("J(w) · drag the ball", PW-8, 14);
+  } else {
+    const NX=56, NY=42, cw=PW/NX, ch=PH/NY;
+    const vals=new Array(NX*NY);
+    let lo=Infinity, hi=-Infinity;
+    for(let iy=0;iy<NY;iy++) for(let ix=0;ix<NX;ix++){
+      const w1 = view.x0 + (ix+0.5)/NX*(view.x1-view.x0);
+      const w2 = view.y0 + (1-(iy+0.5)/NY)*(view.y1-view.y0);
+      const Jv = J([w1,w2]);
+      const lg = isFinite(Jv) ? Math.log10(Math.max(Jv,1e-9)) : NaN;
+      vals[iy*NX+ix]=lg;
+      if (isFinite(lg)){ if (lg<lo) lo=lg; if (lg>hi) hi=lg; }
+    }
+    if (!(hi>lo)){ lo=0; hi=1; }
+    c.fillStyle=col;
+    for(let iy=0;iy<NY;iy++) for(let ix=0;ix<NX;ix++){
+      const lg=vals[iy*NX+ix]; if (!isFinite(lg)) continue;
+      const norm=(lg-lo)/(hi-lo);
+      const band=Math.floor((1-norm)*11)/11;      // valleys glow
+      c.globalAlpha=0.05+0.5*band;
+      c.fillRect(ix*cw, iy*ch, cw+0.5, ch+0.5);
+    }
+    c.globalAlpha=1;
+    if (pathHist.length>1){
+      c.strokeStyle=TH.axis; c.lineWidth=1.6;
+      c.beginPath(); let pen=false;
+      for(const p of pathHist){
+        if (p.length<2){ pen=false; continue; }
+        const px=xToPx(p[0]), py=yToPx(p[1]);
+        pen ? c.lineTo(px,py) : (c.moveTo(px,py), pen=true);
+      }
+      c.stroke();
+    }
+    c.beginPath(); c.arc(xToPx(ps[0].val), yToPx(ps[1].val), 6, 0, 7);
+    c.fillStyle=col; c.fill();
+    c.strokeStyle=TH.plotBg; c.lineWidth=1.6; c.stroke();
+    c.fillStyle=TH.tick;
+    c.font="11px Iowan Old Style, Palatino, Georgia, serif";
+    c.textAlign="right";
+    c.fillText("J(w₁, w₂) · drag the ball", PW-8, 14);
+  }
+}
+function landHandleAt(sx, sy){
+  if (MODE!=="train" || !SHOW_LAND) return null;
+  const L = landscapeCtx();
+  if (!L || !L.J) return null;
+  const ps = L.ps;
+  let bx, by;
+  if (ps.length===1){
+    const Jv = L.J([ps[0].val]);
+    if (!isFinite(Jv)) return null;
+    bx = xToPx(ps[0].val); by = yToPx(Jv);
+  } else {
+    bx = xToPx(ps[0].val); by = yToPx(ps[1].val);
+  }
+  if (Math.hypot(bx-sx, by-sy) >= 18) return null;
+  clearHist();
+  return {set:(wx,wy)=>{
+    ps[0].val = wx;
+    if (ps.length===2) ps[1].val = wy;
+    syncPvals();
+  }};
+}
+
+function drawStrip(){
+  lcSize(); if (!LW) return;
+  const c = lctx;
+  c.setTransform(DPR,0,0,DPR,0,0);
+  c.clearRect(0,0,LW,LH);
+  c.fillStyle=TH.plotBg; c.fillRect(0,0,LW,LH);
+  c.font="10px Iowan Old Style, Palatino, Georgia, serif";
+  if (!lossHist.length){
+    c.fillStyle=TH.tick; c.textAlign="left";
+    c.fillText("loss vs step · ▷ train to record", 8, 14);
+    return;
+  }
+  let lo=Infinity, hi=-Infinity;
+  for(const e of lossHist) for(const v of [e.L, e.T]){
+    if (isFinite(v)){
+      const l=Math.log10(Math.max(v,1e-12));
+      if (l<lo) lo=l; if (l>hi) hi=l;
+    }
+  }
+  if (!(hi>lo)) hi=lo+1;
+  const pad=7, XW=LW-72;
+  const yOf = l => pad + (hi-l)/(hi-lo)*(LH-2*pad);
+  c.strokeStyle=TH.gridLine; c.lineWidth=1;
+  c.fillStyle=TH.tick; c.textAlign="left";
+  for(let d=Math.ceil(lo); d<=Math.floor(hi); d++){
+    const y=yOf(d);
+    c.beginPath(); c.moveTo(0,y); c.lineTo(XW,y); c.stroke();
+    c.fillText("1e"+d, 3, y-2);
+  }
+  const f=leadFit();
+  const col = f ? plotColor(f.id) : TH.plotCols[0];
+  const N=lossHist.length;
+  const line=(key,dash,color)=>{
+    c.strokeStyle=color; c.lineWidth=1.6;
+    if (dash) c.setLineDash([4,3]);
+    c.beginPath(); let pen=false;
+    for(let i=0;i<N;i++){
+      const v=lossHist[i][key];
+      if (!isFinite(v)){ pen=false; continue; }
+      const x = N>1 ? i/(N-1)*XW : 0;
+      const y = yOf(Math.log10(Math.max(v,1e-12)));
+      pen ? c.lineTo(x,y) : (c.moveTo(x,y), pen=true);
+    }
+    c.stroke(); c.setLineDash([]);
+  };
+  line("L", false, col);
+  const hasT = lossHist.some(e=>isFinite(e.T));
+  if (hasT) line("T", true, TH.tick);
+  const last=lossHist[N-1];
+  c.textAlign="left";
+  c.fillStyle=col;             c.fillText("L "+trim(last.L), XW+6, 14);
+  if (isFinite(last.T)){ c.fillStyle=TH.tick; c.fillText("test "+trim(last.T), XW+6, 28); }
+  c.fillStyle=TH.tick;         c.fillText("step "+trainStepCount, XW+6, LH-6);
+}
+
 function constFeeding(nid, port){
   const w = wireInto(nid, port); if(!w) return null;
   const s = nodeById(w.from);
@@ -1173,10 +1490,126 @@ function planeHandleAt(sx, sy){
 }
 let hdrag = null;
 
+/* ---------------- trainer ---------------- */
+let trainStepCount = 0;
+let lossHist = [];      // per step {L, T} for the lead fit
+let pathHist = [];      // per step [p1, p2?] for the lead fit
+let LOSS_CAP = 4000;
+let SHOW_LAND = false;
+function clearHist(){ lossHist=[]; pathHist=[]; }
+function leadFit(){ return nodes.find(n=>n.type==="FIT"); }
+function lossAtParams(fitId, vals){
+  const ps = fitParams(fitId);
+  syncPvals(); globalThis.__trainStep = trainStepCount;
+  const fm = compileInput(fitId,0);
+  let dat; try{ dat = compileInput(fitId,1)(0,t,0); }catch(e){ return NaN; }
+  if (!Array.isArray(dat) || !dat.length) return NaN;
+  const pv = globalThis.__pvals, old = ps.map(p=>pv[p.id]);
+  ps.forEach((p,i)=>{ if (vals && vals[i]!==undefined) pv[p.id]=vals[i]; });
+  let s=0;
+  for(const [qx,qy] of dat){
+    let e; try{ e = fm(qx,t,0)-qy; }catch(err){ s=NaN; break; }
+    s += e*e;
+  }
+  ps.forEach((p,i)=>pv[p.id]=old[i]);
+  return s/dat.length;
+}
+function syncPvals(){
+  const pv = {};
+  for(const n of nodes) if (n.type==="PARAM") pv[n.id]=n.val;
+  globalThis.__pvals = pv;
+}
+function fitParams(fitId){
+  const w = wireInto(fitId,0); if(!w) return [];
+  const ids = new Set();
+  (function up(id){
+    if (ids.has(id)) return; ids.add(id);
+    for(const q of wires) if (q.to===id) up(q.from);
+  })(w.from);
+  return nodes.filter(n=>n.type==="PARAM" && ids.has(n.id));
+}
+function fitLossOf(fitId, port){       // port 1 = data, 2 = test
+  syncPvals();
+  globalThis.__trainStep = trainStepCount;
+  const fm = compileInput(fitId,0);
+  let d; try{ d = compileInput(fitId,port)(0,t,0); }catch(e){ return NaN; }
+  if (!Array.isArray(d) || !d.length) return NaN;
+  let s=0;
+  for(const [qx,qy] of d){
+    let e; try{ e = fm(qx,t,0)-qy; }catch(err){ return NaN; }
+    s += e*e;
+  }
+  return s/d.length;
+}
+function trainStep(){
+  globalThis.__trainStep = trainStepCount;
+  syncPvals();
+  const pv = globalThis.__pvals;
+  for(const f of nodes.filter(n=>n.type==="FIT")){
+    const ps = fitParams(f.id); if(!ps.length) continue;
+    const alpha = (f.alpha!==undefined) ? f.alpha : 0.1;
+    const fm = compileInput(f.id,0);
+    let dat; try{ dat = compileInput(f.id,1)(0,t,0); }catch(e){ continue; }
+    if (!Array.isArray(dat) || !dat.length) continue;
+    const lossAt = ()=>{
+      let s=0;
+      for(const [qx,qy] of dat){ const e=fm(qx,t,0)-qy; s+=e*e; }
+      return s/dat.length;
+    };
+    const g = [];
+    for(const p of ps){
+      const v = pv[p.id];
+      const h = 1e-4*Math.max(1, Math.abs(v));
+      pv[p.id]=v+h; const L1=lossAt();
+      pv[p.id]=v-h; const L0=lossAt();
+      pv[p.id]=v;
+      g.push((L1-L0)/(2*h));
+    }
+    ps.forEach((p,ix)=>{
+      const nv = p.val - alpha*g[ix];
+      if (isFinite(nv)) p.val = nv;
+    });
+    if (f===leadFit()){
+      ps.forEach(p=>{ pv[p.id]=p.val; });
+      let Lrec; try{ Lrec = lossAt(); }catch(e){ Lrec = NaN; }
+      let Trec = NaN;
+      if (wireInto(f.id,2)){
+        try{
+          const td = compileInput(f.id,2)(0,t,0);
+          if (Array.isArray(td) && td.length){
+            let s=0;
+            for(const [qx,qy] of td){ const e=fm(qx,t,0)-qy; s+=e*e; }
+            Trec = s/td.length;
+          }
+        }catch(e){}
+      }
+      lossHist.push({L:Lrec, T:Trec});
+      pathHist.push(ps.map(p=>p.val));
+      if (lossHist.length>LOSS_CAP){
+        lossHist = lossHist.filter((_,i)=>i%2===0);
+        pathHist = pathHist.filter((_,i)=>i%2===0);
+      }
+    }
+  }
+  trainStepCount++;
+  syncPvals();
+}
+function resetParams(){
+  beginAction();
+  for(const n of nodes) if (n.type==="PARAM")
+    n.val = Math.round((Math.random()*4-2)*100)/100;
+  endAction();
+  trainStepCount = 0;
+  globalThis.__trainStep = 0;
+  clearHist();
+  updateInspector(); drawAll();
+}
+
 /* ---------------- expression readout ---------------- */
 const exprEl = document.getElementById("expr");
 function activeDefaultOutput(){
   if (MODE==="la") return nodes.find(n=>n.type==="DRAWV"||n.type==="DRAWM");
+  if (MODE==="train") return nodes.find(n=>n.type==="FIT");
   const ty = MODE==="par" ? "PLOT2" : "PLOT";
   return nodes.find(n=>n.type===ty);
 }
@@ -1190,8 +1623,26 @@ function updateExpr(){
   const lhs = nd.type==="PLOT2" ? "(x, y) = "
             : nd.type==="DRAWV" ? "v = "
             : nd.type==="DRAWM" ? "M = "
+            : nd.type==="FIT"   ? "model · y = "
             : "y = ";
   let suffix = "";
+  if (MODE==="train"){
+    try{
+      if (nd.type==="FIT"){
+        const L = fitLossOf(id,1);
+        if (isFinite(L)) suffix = `  ·  L = ${trim(L)}`;
+        if (wireInto(id,2)){
+          const Lt = fitLossOf(id,2);
+          if (isFinite(Lt)) suffix += `  ·  test ${trim(Lt)}`;
+        }
+        suffix += `  ·  step ${trainStepCount}`;
+      } else if (outTypeOf(DEFS[nd.type])==="d"){
+        syncPvals(); globalThis.__trainStep = trainStepCount;
+        const pts = compile(id)(0,t,0);
+        if (Array.isArray(pts)) suffix = `  ·  ${pts.length} pts`;
+      }
+    }catch(e){}
+  }
   if (MODE==="la"){
     try{
       const def = DEFS[nd.type];
@@ -1225,7 +1676,8 @@ function updateInspector(){
     insp.style.display="block";
     const lo = Math.min(-10, Math.floor(n.val)-10);
     const hi = Math.max(10, Math.ceil(n.val)+10);
-    insp.innerHTML = `<div class="row"><span class="name">const</span>
+    const nm = DEFS[n.type].learn ? "param" : "const";
+    insp.innerHTML = `<div class="row"><span class="name">${nm}</span>
       <input type="range" id="cval" min="${lo}" max="${hi}" step="0.05" value="${n.val}">
       <input type="number" id="cnum" inputmode="decimal" step="any" value="${n.val}"></div>`;
     const sl = insp.querySelector("#cval"), num = insp.querySelector("#cnum");
@@ -1241,6 +1693,21 @@ function updateInspector(){
       if (!isFinite(v)) num.value=n.val;
       else updateInspector();
     });
+  } else if (n.type==="FIT"){
+    insp.style.display="block";
+    const a = (n.alpha!==undefined) ? n.alpha : 0.1;
+    insp.innerHTML = `<div class="row"><span class="name">α rate</span>
+      <input type="range" id="aval" min="0.001" max="1" step="0.001" value="${a}">
+      <input type="number" id="anum" inputmode="decimal" step="any" value="${a}"></div>`;
+    const sl = insp.querySelector("#aval"), num = insp.querySelector("#anum");
+    let pushed=false;
+    const mark = ()=>{ if(!pushed){ pushed=true; beginAction(); } };
+    sl.addEventListener("input", ()=>{ mark(); n.alpha=parseFloat(sl.value);
+      num.value=n.alpha; updateExpr(); });
+    sl.addEventListener("change", endAction);
+    num.addEventListener("input", ()=>{ const v=parseFloat(num.value);
+      if (isFinite(v) && v>0){ mark(); n.alpha=v; sl.value=v; updateExpr(); } });
+    num.addEventListener("change", endAction);
   } else if (n.type==="COMMENT"){
     insp.style.display="block";
     insp.innerHTML = `<div class="row"><span class="name">comment</span>
@@ -1463,7 +1930,7 @@ pc.addEventListener("pointerdown", e=>{
   pc.setPointerCapture(e.pointerId);
   const r = pc.getBoundingClientRect();
   const sx = e.clientX-r.left, sy = e.clientY-r.top;
-  const h = planeHandleAt(sx, sy);
+  const h = planeHandleAt(sx, sy) || landHandleAt(sx, sy);
   if (h){ hdrag = {h, pid:e.pointerId}; beginAction(); return; }
   ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
 });
@@ -1645,6 +2112,7 @@ dFile.addEventListener("click", e=>{
   if (act==="new"){ beginAction();
     nodes=[]; wires=[]; nextId=1; selId=-1; selWire=null;
     endAction(); gpan={x:0,y:0}; gscale=1;
+    trainStepCount=0; globalThis.__trainStep=0; clearHist(); syncPvals();
     updateInspector(); drawAll(); }
   else if (act==="open"){ fileIn.click(); }
   else if (act==="save"){ saveGraphFile(); }
@@ -1670,7 +2138,7 @@ document.getElementById("themeBtn").addEventListener("click", ()=>{
 const domRow = document.getElementById("domRow");
 const t0In = document.getElementById("t0"), t1In = document.getElementById("t1");
 const subLine = document.getElementById("subLine");
-const MODE_LABEL = {"1d":"1d explicit","par":"parametric 2d","la":"linear algebra 2d"};
+const MODE_LABEL = {"1d":"1d explicit","par":"parametric 2d","la":"linear algebra 2d","train":"train"};
 function setMode(m, quiet){
   MODE = MODE_LABEL[m] ? m : "1d";
   for(const b of dMode.querySelectorAll("button"))
@@ -1681,8 +2149,17 @@ function setMode(m, quiet){
   subLine.textContent =
     MODE==="par" ? "every wire carries a function of t · plot xy draws ( x(t), y(t) ) · tap a node to see it vs t"
   : MODE==="la"  ? "wires are typed — ● scalar · ◆ vector · ■ matrix — drag arrowheads and î ĵ right in the plane"
-  :                "every wire carries y(x) · flow nodes re-parameterize · tap a node for its curve & recipe";
-  if (MODE!=="1d") lockAspect();
+  : MODE==="train" ? "data rides gold wires · params wear the vermilion ring · ▷ train runs gradient descent on them"
+  :                "every wire carries y(x) · flow nodes re-parameterize · tap a node for its curve & recipe"
+  ;
+  stepBtn.style.display  = MODE==="train" ? "" : "none";
+  resetBtn.style.display = MODE==="train" ? "" : "none";
+  landBtn.style.display  = MODE==="train" ? "" : "none";
+  spdRow.style.display   = MODE==="train" ? "flex" : "none";
+  document.getElementById("stripStage").style.display = MODE==="train" ? "" : "none";
+  if (MODE!=="train" && SHOW_LAND){ SHOW_LAND=false; landBtn.classList.remove("on"); }
+  if (!playing) playBtn.textContent = MODE==="train" ? "▷ train" : "▷ play τ";
+  if (MODE==="par"||MODE==="la") lockAspect();
   rebuildExamples();
   if (!quiet) drawAll();
 }
@@ -1694,6 +2171,16 @@ function domChanged(){
 }
 t0In.addEventListener("input", domChanged);
 t1In.addEventListener("input", domChanged);
+const spdRow = document.getElementById("spdRow");
+const spdIn = document.getElementById("spd");
+const spdVal = document.getElementById("spdVal");
+let trainSPS = 60, spAcc = 0;
+function spdChanged(){
+  trainSPS = Math.round(Math.pow(240, parseFloat(spdIn.value)));
+  spdVal.textContent = trainSPS + (trainSPS===1 ? " step/s" : " steps/s");
+}
+spdIn.addEventListener("input", spdChanged);
+spdChanged();
 
 /* ---------------- keyboard ---------------- */
 window.addEventListener("keydown", e=>{
@@ -1721,14 +2208,50 @@ document.getElementById("redoBtn").addEventListener("click", redo);
 document.getElementById("copyBtn").addEventListener("click", copySelected);
 document.getElementById("pasteBtn").addEventListener("click", ()=>pasteClip());
 const playBtn = document.getElementById("playBtn");
+const stepBtn = document.getElementById("stepBtn");
+const resetBtn = document.getElementById("resetBtn");
+const landBtn = document.getElementById("landBtn");
+landBtn.addEventListener("click", ()=>{
+  SHOW_LAND = !SHOW_LAND;
+  landBtn.classList.toggle("on", SHOW_LAND);
+  if (SHOW_LAND){
+    const f = leadFit();
+    const np = f ? fitParams(f.id).length : 0;
+    view = (np===1) ? {x0:-3.2, x1:3.2, y0:-0.6, y1:5.4}
+                    : {x0:-3,   x1:3,   y0:-2.5, y1:2.5};
+  } else {
+    view = {x0:-3.4, x1:3.4, y0:-2.2, y1:2.2};
+  }
+  drawPlot(); updateExpr();
+});
+stepBtn.addEventListener("click", ()=>{
+  beginAction(); trainStep(); endAction();
+  updateInspector(); drawAll();
+});
+resetBtn.addEventListener("click", resetParams);
 playBtn.addEventListener("click", ()=>{
   playing=!playing; playBtn.classList.toggle("on", playing);
-  playBtn.textContent = playing ? "◼ pause τ" : "▷ play τ";
-  if (playing) requestAnimationFrame(tick);
+  playBtn.textContent = playing
+    ? (MODE==="train" ? "◼ pause" : "◼ pause τ")
+    : (MODE==="train" ? "▷ train" : "▷ play τ");
+  if (playing){
+    if (MODE==="train"){ beginAction(); spAcc=0; }
+    requestAnimationFrame(tick);
+  } else if (MODE==="train") endAction();
 });
 function tick(){
   if (!playing) return;
-  t += 1/60; drawPlot(); updateExpr();
+  if (MODE==="train"){
+    spAcc += trainSPS/60;
+    const k = Math.floor(spAcc);
+    if (k){
+      spAcc -= k;
+      for(let q=0;q<Math.min(k,8);q++) trainStep();
+      drawAll();
+    }
+  } else {
+    t += 1/60; drawPlot(); updateExpr();
+  }
   requestAnimationFrame(tick);
 }
 
@@ -1748,15 +2271,17 @@ function loadPreset(p){
   const build = p.build || p;
   if (nodes.length) beginAction();
   nodes=[]; wires=[]; nextId=1; selId=-1; selWire=null; t=0;
+  trainStepCount=0; globalThis.__trainStep=0; clearHist(); SHOW_LAND=false;
   if (p.mode==="par"){ tDom = p.dom ? {a:p.dom[0], b:p.dom[1]} : {a:0, b:6.2832}; }
   build();
   if (undoStack.length) endAction();
   setMode(p.mode || "1d", true);
   gpan={x:0,y:0}; gscale=1;
-  if (p.view){ view = {...p.view}; if (MODE!=="1d") lockAspect(); }
+  if (p.view){ view = {...p.view}; if (MODE==="par"||MODE==="la") lockAspect(); }
   else if (MODE==="par"){ view={x0:-2.4,x1:2.4,y0:-2,y1:2}; lockAspect(); }
   else if (MODE==="la"){ view={x0:-3.2,x1:3.2,y0:-2.6,y1:2.6}; lockAspect(); }
   else view = {x0:-3.4, x1:3.4, y0:-2.2, y1:2.2};
+  syncPvals();
   updateInspector(); drawAll();
 }
 function note(x,y,text){ const c=addNode("COMMENT",x,y); c.text=text; return c; }
@@ -2180,6 +2705,111 @@ const CURRICULA = {
   },
 }],
 ],
+"train": [
+["i · fit by hand", {
+  "fit by hand — a line": ()=>{
+    note(16,-70,"Noisy line data. The model is w·x + b with plain consts. Scrub w and b — watch L (mean squared error) fall. The whiskers are the errors you are shrinking. You are the optimizer.");
+    const w=addNode("CONST",16,60,-0.4), x=addNode("X",16,130);
+    const m=addNode("MUL",128,82), b=addNode("CONST",128,152,0.9);
+    const ad=addNode("ADD",240,104);
+    const dg=addNode("DGLINE",240,210);
+    const f=addNode("FIT",372,140);
+    connect(w.id,m.id,0); connect(x.id,m.id,1);
+    connect(m.id,ad.id,0); connect(b.id,ad.id,1);
+    connect(ad.id,f.id,0); connect(dg.id,f.id,1);
+  },
+}],
+["ii · the machine scrubs", {
+  "the machine scrubs": ()=>{
+    note(16,-70,"Same graph — but w and b are params (vermilion ring): consts the machine may turn. Press ▷ train. Gradient descent scrubs the sliders for you. α lives inside the fit node.");
+    const w=addNode("PARAM",16,60,-0.4), x=addNode("X",16,130);
+    const m=addNode("MUL",128,82), b=addNode("PARAM",128,152,0.9);
+    const ad=addNode("ADD",240,104);
+    const dg=addNode("DGLINE",240,210);
+    const f=addNode("FIT",372,140); f.alpha=0.15;
+    connect(w.id,m.id,0); connect(x.id,m.id,1);
+    connect(m.id,ad.id,0); connect(b.id,ad.id,1);
+    connect(ad.id,f.id,0); connect(dg.id,f.id,1);
+  },
+  "one knob — the bowl": ()=>{
+    note(16,-52,"One param: y = w·x, data drawn from 0.8·x. The loss J(w) is a single bowl — watch w slide straight to 0.8. Use ⟳ step to descend one stride at a time.");
+    const w=addNode("PARAM",16,60,-1.2), x=addNode("X",16,130);
+    const m=addNode("MUL",128,82);
+    const dg=addNode("DGLINE",128,190);
+    const na=addNode("CONST",16,240,0.8), nb=addNode("CONST",16,310,0);
+    const f=addNode("FIT",260,120); f.alpha=0.2;
+    connect(w.id,m.id,0); connect(x.id,m.id,1);
+    connect(na.id,dg.id,1); connect(nb.id,dg.id,2);
+    connect(m.id,f.id,0); connect(dg.id,f.id,1);
+  },
+  "α too large": ()=>{
+    note(16,-70,"Same fit, but α = 0.85 — each stride overshoots the valley floor and lands higher on the far wall. Watch L climb instead of fall. Select the fit node and lower α to rescue it.");
+    const w=addNode("PARAM",16,60,-0.4), x=addNode("X",16,130);
+    const m=addNode("MUL",128,82), b=addNode("PARAM",128,152,0.9);
+    const ad=addNode("ADD",240,104);
+    const dg=addNode("DGLINE",240,210);
+    const f=addNode("FIT",372,140); f.alpha=0.85;
+    connect(w.id,m.id,0); connect(x.id,m.id,1);
+    connect(m.id,ad.id,0); connect(b.id,ad.id,1);
+    connect(ad.id,f.id,0); connect(dg.id,f.id,1);
+  },
+  "mini-batch jitter": ()=>{
+    note(16,-70,"A batch node deals 6 points per step instead of all 40 — stochastic gradient descent. Each stride answers to a different jury, so the walk jitters — but it still lands. Scrub k.");
+    const w=addNode("PARAM",16,60,-0.4), x=addNode("X",16,130);
+    const m=addNode("MUL",128,82), b=addNode("PARAM",128,152,0.9);
+    const ad=addNode("ADD",240,104);
+    const dg=addNode("DGLINE",128,240);
+    const k=addNode("CONST",128,380,6);
+    const bt=addNode("DBATCH",262,268);
+    const f=addNode("FIT",380,150); f.alpha=0.12;
+    connect(w.id,m.id,0); connect(x.id,m.id,1);
+    connect(m.id,ad.id,0); connect(b.id,ad.id,1);
+    connect(dg.id,bt.id,0); connect(k.id,bt.id,1);
+    connect(ad.id,f.id,0); connect(bt.id,f.id,1);
+  },
+}],
+["iii · the map", {
+  "two knobs — the map": ()=>{
+    note(16,-70,"Two params → the loss J(w, b) is a surface. Press ⛰ landscape: contour plates, valleys glowing. ▷ train inks the descent path. Drag the ball to restart the walk anywhere.");
+    const w=addNode("PARAM",16,60,-1.6), x=addNode("X",16,130);
+    const m=addNode("MUL",128,82), b=addNode("PARAM",128,152,1.7);
+    const ad=addNode("ADD",240,104);
+    const dg=addNode("DGLINE",240,210);
+    const f=addNode("FIT",372,140); f.alpha=0.15;
+    connect(w.id,m.id,0); connect(x.id,m.id,1);
+    connect(m.id,ad.id,0); connect(b.id,ad.id,1);
+    connect(ad.id,f.id,0); connect(dg.id,f.id,1);
+  },
+  "mini-batch on the map": ()=>{
+    note(16,-70,"Same map, but every stride is judged by only 6 points — the inked path staggers downhill. Tap the batch wire and delete it, rewire the data straight in, and watch the smooth full-batch walk.");
+    const w=addNode("PARAM",16,60,-1.6), x=addNode("X",16,130);
+    const m=addNode("MUL",128,82), b=addNode("PARAM",128,152,1.7);
+    const ad=addNode("ADD",240,104);
+    const dg=addNode("DGLINE",128,240);
+    const k=addNode("CONST",128,380,6);
+    const bt=addNode("DBATCH",262,268);
+    const f=addNode("FIT",380,150); f.alpha=0.12;
+    connect(w.id,m.id,0); connect(x.id,m.id,1);
+    connect(m.id,ad.id,0); connect(b.id,ad.id,1);
+    connect(dg.id,bt.id,0); connect(k.id,bt.id,1);
+    connect(ad.id,f.id,0); connect(bt.id,f.id,1);
+  },
+}],
+["iv · convex or not", {
+  "non-convex — false valleys": ()=>{
+    note(16,-88,"Model A·sin(k·x), learning the frequency k. J(k) is wavy — ⛰ shows valleys that are lies. This run starts near k = 0.3: descent parks in the flatline valley and calls it done. Drag the ball past the hill — truth lives at k = 2. Initialization decides the ending.");
+    const kk=addNode("PARAM",16,70,0.3), x=addNode("X",16,140);
+    const m=addNode("MUL",128,92), s=addNode("SIN",240,92);
+    const amp=addNode("CONST",240,170,0.8), m2=addNode("MUL",352,114);
+    const dg=addNode("DGWAVE",240,250);
+    const f=addNode("FIT",470,150); f.alpha=0.05;
+    connect(kk.id,m.id,0); connect(x.id,m.id,1);
+    connect(m.id,s.id,0);
+    connect(s.id,m2.id,0); connect(amp.id,m2.id,1);
+    connect(m2.id,f.id,0); connect(dg.id,f.id,1);
+  },
+}],
+],
 };
 function rebuildExamples(){
   dEx.innerHTML="";
@@ -2201,7 +2831,7 @@ for(const mode of Object.keys(CURRICULA))
       PRESETS[name] = {build:entry, dom:entry.dom, mode};
 
 /* ---------------- boot ---------------- */
-function drawAll(){ drawGraph(); drawPlot(); updateExpr(); }
+function drawAll(){ syncPvals(); drawGraph(); drawPlot(); if (MODE==="train") drawStrip(); updateExpr(); }
 setTheme("ink");
 setMode("1d", true);
 loadPreset(PRESETS["wave"]);
