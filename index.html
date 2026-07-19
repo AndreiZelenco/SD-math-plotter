@@ -838,10 +838,13 @@ function sizeCanvas(cv){
   return {w:r.width, h:r.height};
 }
 let GW=0,GH=0,PW=0,PH=0;
-function resize(){
+function measureCanvases(){
   ({w:GW,h:GH} = sizeCanvas(gc));
   ({w:PW,h:PH} = sizeCanvas(pc));
   if (MODE==="par"||MODE==="la") lockAspect();
+}
+function resize(){
+  measureCanvases();
   drawAll();
 }
 window.addEventListener("resize", resize);
@@ -2481,6 +2484,7 @@ function setMode(m, quiet){
   document.getElementById("mapStage").style.display =
     (MODE==="train" && SHOW_LAND) ? "" : "none";
   document.querySelector(".wrap").classList.toggle("trainmode", MODE==="train");
+  measureCanvases();
   if (!playing) playBtn.textContent = MODE==="train" ? "▷ train" : "▷ play τ";
   if (MODE==="par"||MODE==="la") lockAspect();
   rebuildExamples();
